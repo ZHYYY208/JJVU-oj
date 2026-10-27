@@ -511,6 +511,21 @@ class JjyuojAvatarHandler extends Handler {
     }
 }
 
+// 本地默认头像：所有 Gravatar 请求都重定向到本站此路由，不访问任何外网
+class JjyuojDefaultAvatarHandler extends Handler {
+    noCheckPermView = true;
+
+    async get() {
+        this.response.type = 'image/svg+xml';
+        this.response.addHeader('Cache-Control', 'public, max-age=86400');
+        this.response.body = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <circle cx="64" cy="64" r="64" fill="#e2e8f0"/>
+  <circle cx="64" cy="50" r="22" fill="#94a3b8"/>
+  <path d="M64 78c-24 0-40 14-40 30v6h80v-6c0-16-16-30-40-30z" fill="#94a3b8"/>
+</svg>`;
+    }
+}
+
 class JjyuojLogoHandler extends Handler {
     noCheckPermView = true;
 
@@ -544,4 +559,5 @@ export async function apply(ctx: Context) {
     ctx.Route('jjyuoj_logo_svg', '/jjyuoj-logo.svg', JjyuojLogoHandler);
     ctx.Route('jjyuoj_favicon', '/favicon.ico', JjyuojLogoHandler);
     ctx.Route('jjyuoj_avatar', '/jjyuoj-avatar.jpg', JjyuojAvatarHandler);
+    ctx.Route('jjyuoj_default_avatar', '/jjyuoj-avatar/:hash', JjyuojDefaultAvatarHandler);
 }

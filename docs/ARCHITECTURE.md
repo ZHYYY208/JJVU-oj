@@ -75,7 +75,7 @@
     创建评测账号 uid=2、管理员 uid=1、域 jjyu、站点设置、开放加入
     执行 seed/seed-demo.js（示例题目/比赛/作业，幂等）
     执行 seed/lang-config.js（分语言时间/内存倍率，幂等）
-    执行 seed/site-config.js（根域改名、头像镜像、域头像，幂等）
+    执行 seed/site-config.js（根域改名、头像本地化、域头像，幂等）
 → pm2-runtime start hydrooj（监听 0.0.0.0:8888）
 ```
 
@@ -195,9 +195,12 @@ addons/ai-problem/
 | `GET /favicon.ico` | `JjyuojLogoHandler` | 公开（供浏览器默认请求） |
 | `GET /jjyuoj-logo.svg` | `JjyuojLogoHandler` | 公开（兼容旧地址） |
 | `GET /jjyuoj-avatar.jpg` | `JjyuojAvatarHandler` | 公开（首页头像，本地文件） |
+| `GET /jjyuoj-avatar/:hash` | `JjyuojDefaultAvatarHandler` | 公开（本地默认头像，承接所有 Gravatar 请求） |
 
 `JjyuojLogoHandler` 读取 `assets/logo.png` 并缓存，文件缺失时回退为内置 SVG。
 `JjyuojAvatarHandler` 读取 `assets/avatar.jpg` 并缓存（文件缺失返回 404）。
+`JjyuojDefaultAvatarHandler` 直接返回内置 SVG 默认头像：`avatar.gravatar_url` 被设为
+`/jjyuoj-avatar/`，所有 Gravatar 头像请求都落到本站此路由，全程不出网。
 导航栏 logo 由系统设置 `ui-default.nav_logo_dark` 指向 `/jjyuoj-logo.png`；
 页面 `<head>` 中的 favicon / apple-touch-icon / `og:image` 通过覆盖的
 `templates/layout/html5.html` 指向同一路径。
@@ -346,7 +349,7 @@ D:\JJVUoj
 │       ├── seed-demo.js        # 示例题目 / 比赛 / 作业 / 首页公告
 │       ├── home.md             # 首页公告 Markdown
 │       ├── lang-config.js      # 分语言时间 / 内存倍率
-│       └── site-config.js      # 根域改名、头像镜像、域头像
+│       └── site-config.js      # 根域改名、头像本地化、域头像
 ├── judge/
 │   ├── Dockerfile
 │   ├── entrypoint.sh

@@ -319,18 +319,22 @@ docker exec jjvuoj-backend hydrooj cli execute \
 
 ### 站点品牌与头像
 
-顶部导航里显示的域名默认是「Hydro」（根域 `system` 的名称），且头像默认走 Gravatar
-（`cn.gravatar.com`，国内打不开，会显示破图）。这两处由 `backend/seed/site-config.js` 处理：
+顶部导航里显示的域名默认是「Hydro」（根域 `system` 的名称），且用户头像默认走 Gravatar
+（`cn.gravatar.com`，国内打不开，会显示破图）。这两处由 `backend/seed/site-config.js` 处理，
+**头像、背景图全部本地化，不访问任何外网**：
 
 - 把根域名称改成 `JJVUoj`；
-- 把 Gravatar 地址换成国内镜像 `https://gravatar.loli.net/avatar/`；
+- 把 Gravatar 地址改成本站自己的路由 `/jjyuoj-avatar/`（插件 `JjyuojDefaultAvatarHandler`
+  返回本地默认头像 SVG，任何头像请求都不再出网）；
 - 把 `system`、`jjyu` 两个域的域头像指向本地 `/jjyuoj-logo.png`（`url:` 前缀表示直接用该地址）。
+
+用户个人主页的背景图（`/components/profile/backgrounds/*.jpg`）本来就由站点本地提供，无需处理。
 
 该脚本幂等，首次启动自动执行。**已部署的环境**手动执行一次即可（然后重启后端）：
 
 ```bash
 docker exec jjvuoj-backend hydrooj cli execute \
-  "await SystemModel.set('avatar.gravatar_url','https://gravatar.loli.net/avatar/'); await DomainModel.edit('system',{name:'JJVUoj',avatar:'url:/jjyuoj-logo.png'}); await DomainModel.edit('jjyu',{avatar:'url:/jjyuoj-logo.png'})"
+  "await SystemModel.set('avatar.gravatar_url','/jjyuoj-avatar/'); await DomainModel.edit('system',{name:'JJVUoj',avatar:'url:/jjyuoj-logo.png'}); await DomainModel.edit('jjyu',{avatar:'url:/jjyuoj-logo.png'})"
 docker compose restart oj-backend
 ```
 
