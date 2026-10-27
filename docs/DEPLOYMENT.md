@@ -317,6 +317,23 @@ docker exec jjvuoj-backend hydrooj cli execute \
 `border-radius` 和 `:hover`，做不了圆形按钮 + 悬浮提示）。要换头像 / 名字 / 链接，直接改这个文件里的
 `href`、`img src` 和 `.jjyuoj-dev__tip` 文本，然后 `docker compose restart oj-backend`。
 
+### 站点品牌与头像
+
+顶部导航里显示的域名默认是「Hydro」（根域 `system` 的名称），且头像默认走 Gravatar
+（`cn.gravatar.com`，国内打不开，会显示破图）。这两处由 `backend/seed/site-config.js` 处理：
+
+- 把根域名称改成 `JJVUoj`；
+- 把 Gravatar 地址换成国内镜像 `https://gravatar.loli.net/avatar/`；
+- 把 `system`、`jjyu` 两个域的域头像指向本地 `/jjyuoj-logo.png`（`url:` 前缀表示直接用该地址）。
+
+该脚本幂等，首次启动自动执行。**已部署的环境**手动执行一次即可（然后重启后端）：
+
+```bash
+docker exec jjvuoj-backend hydrooj cli execute \
+  "await SystemModel.set('avatar.gravatar_url','https://gravatar.loli.net/avatar/'); await DomainModel.edit('system',{name:'JJVUoj',avatar:'url:/jjyuoj-logo.png'}); await DomainModel.edit('jjyu',{avatar:'url:/jjyuoj-logo.png'})"
+docker compose restart oj-backend
+```
+
 ### 语言时间 / 内存倍率
 
 题目里填的 `time` / `memory` 是基础限制，判题时会乘以该语言的倍率（HydroJudge 的 `time_limit_rate` / `memory_limit_rate`）。默认配置在 `backend/seed/lang-config.js`，首次初始化写入 `hydrooj.langs`：
@@ -398,6 +415,7 @@ docker compose restart oj-backend
 | Java 提交秒 RE（退出码 1，耗时几十毫秒） | 小内存下 JVM 默认堆策略启动失败；确认 `java.execute` 带有 `-Xms8m -Xmx4096m -XX:+UseSerialGC` |
 | 改了语言倍率不生效 | CLI 修改 `hydrooj.langs` 后必须 `docker compose restart oj-backend` |
 | AI 页面 500 | 插件模板变量不要命名为 `model`（会遮蔽 Hydro 全局 `model` 对象） |
+| 顶部域名显示「Hydro」、头像破图 | 根域默认名未改 + Gravatar 被墙。执行 `backend/seed/site-config.js`（见「站点品牌与头像」） |
 | AI 页面难度/时间/内存字段为空 | 插件传给模板的表单数据不能用 `form`（`layout/html5.html` 已把 `form` 用作表单宏命名空间），应命名 `genForm` |
 | AI 生成报“判题沙箱不可用” | 确认 `oj-judge` 已启动且后端能访问 `http://oj-judge:5050` |
 | 磁盘不足 | `docker system df`、`docker image prune`、清理旧数据 |

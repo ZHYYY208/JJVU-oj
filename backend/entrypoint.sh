@@ -51,6 +51,10 @@ if [ ! -f "$ROOT/first" ]; then
   # 分语言的时间 / 内存倍率（幂等，失败不阻塞启动）
   LANG_RATES_CODE="$(cat /root/seed/lang-config.js)"
   hydrooj cli execute "$LANG_RATES_CODE" 2>/dev/null || true
+
+  # 站点品牌与头像配置（幂等，失败不阻塞启动）
+  SITE_CONFIG_CODE="$(cat /root/seed/site-config.js)"
+  hydrooj cli execute "$SITE_CONFIG_CODE" 2>/dev/null || true
 fi
 
 echo "[JJVUoj] backend starting, admin password file: ./data/backend/admin-password.txt"

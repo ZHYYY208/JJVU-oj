@@ -75,6 +75,7 @@
     创建评测账号 uid=2、管理员 uid=1、域 jjyu、站点设置、开放加入
     执行 seed/seed-demo.js（示例题目/比赛/作业，幂等）
     执行 seed/lang-config.js（分语言时间/内存倍率，幂等）
+    执行 seed/site-config.js（根域改名、头像镜像、域头像，幂等）
 → pm2-runtime start hydrooj（监听 0.0.0.0:8888）
 ```
 
@@ -344,7 +345,8 @@ D:\JJVUoj
 │   └── seed/                   # 初始化数据（幂等）
 │       ├── seed-demo.js        # 示例题目 / 比赛 / 作业 / 首页公告
 │       ├── home.md             # 首页公告 Markdown
-│       └── lang-config.js      # 分语言时间 / 内存倍率
+│       ├── lang-config.js      # 分语言时间 / 内存倍率
+│       └── site-config.js      # 根域改名、头像镜像、域头像
 ├── judge/
 │   ├── Dockerfile
 │   ├── entrypoint.sh

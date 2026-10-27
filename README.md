@@ -26,7 +26,8 @@
 │   └── seed/                 # 首次初始化写入的数据
 │       ├── seed-demo.js      # 示例题目 / 比赛 / 作业
 │       ├── home.md           # 首页公告（Markdown，含 GitHub 链接）
-│       └── lang-config.js    # 分语言时间 / 内存倍率
+│       ├── lang-config.js    # 分语言时间 / 内存倍率
+│       └── site-config.js    # 根域改名 / 头像镜像 / 域头像
 ├── judge/                    # 判题机镜像
 │   ├── Dockerfile            # HydroJudge + go-judge 沙箱 + gcc/python3/java
 │   ├── entrypoint.sh
