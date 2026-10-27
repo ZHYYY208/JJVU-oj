@@ -170,7 +170,8 @@ addons/ai-problem/
 ├── package.json          # 插件名 jjyu-ai-problem，入口 index.ts
 ├── index.ts              # 路由、Handler、模型调用、沙箱调度
 ├── assets/
-│   └── logo.png          # 站点主 logo（圆形透明底 PNG）
+│   ├── logo.png          # 站点主 logo（圆形透明底 PNG）
+│   └── avatar.jpg        # 首页「开发与维护」GitHub 头像（本地化，避免运行时查询 GitHub）
 ├── locales/              # zh.yaml / en.yaml
 └── templates/
     ├── ai_problem.html   # 页面与结果展示
@@ -191,8 +192,10 @@ addons/ai-problem/
 | `GET /jjyuoj-logo.png` | `JjyuojLogoHandler` | 公开 |
 | `GET /favicon.ico` | `JjyuojLogoHandler` | 公开（供浏览器默认请求） |
 | `GET /jjyuoj-logo.svg` | `JjyuojLogoHandler` | 公开（兼容旧地址） |
+| `GET /jjyuoj-avatar.jpg` | `JjyuojAvatarHandler` | 公开（首页头像，本地文件） |
 
 `JjyuojLogoHandler` 读取 `assets/logo.png` 并缓存，文件缺失时回退为内置 SVG。
+`JjyuojAvatarHandler` 读取 `assets/avatar.jpg` 并缓存（文件缺失返回 404）。
 导航栏 logo 由系统设置 `ui-default.nav_logo_dark` 指向 `/jjyuoj-logo.png`；
 页面 `<head>` 中的 favicon / apple-touch-icon / `og:image` 通过覆盖的
 `templates/layout/html5.html` 指向同一路径。

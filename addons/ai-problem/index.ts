@@ -472,6 +472,45 @@ function readLogoPng() {
     return logoPng;
 }
 
+const AVATAR_PATHS = [
+    join(__dirname, 'assets', 'avatar.jpg'),
+    '/root/.hydro/addons/ai-problem/assets/avatar.jpg',
+];
+
+let avatarJpg: Buffer | null | undefined;
+
+function readAvatarJpg() {
+    if (avatarJpg !== undefined) return avatarJpg;
+    for (const file of AVATAR_PATHS) {
+        try {
+            if (existsSync(file)) {
+                avatarJpg = readFileSync(file);
+                return avatarJpg;
+            }
+        } catch (e) {
+            // try next candidate
+        }
+    }
+    avatarJpg = null;
+    return avatarJpg;
+}
+
+class JjyuojAvatarHandler extends Handler {
+    noCheckPermView = true;
+
+    async get() {
+        const jpg = readAvatarJpg();
+        if (jpg) {
+            this.response.type = 'image/jpeg';
+            this.response.addHeader('Cache-Control', 'public, max-age=86400');
+            this.response.body = jpg;
+            return;
+        }
+        this.response.status = 404;
+        this.response.body = '';
+    }
+}
+
 class JjyuojLogoHandler extends Handler {
     noCheckPermView = true;
 
@@ -504,4 +543,5 @@ export async function apply(ctx: Context) {
     ctx.Route('jjyuoj_logo_png', '/jjyuoj-logo.png', JjyuojLogoHandler);
     ctx.Route('jjyuoj_logo_svg', '/jjyuoj-logo.svg', JjyuojLogoHandler);
     ctx.Route('jjyuoj_favicon', '/favicon.ico', JjyuojLogoHandler);
+    ctx.Route('jjyuoj_avatar', '/jjyuoj-avatar.jpg', JjyuojAvatarHandler);
 }
