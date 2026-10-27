@@ -178,6 +178,7 @@ addons/ai-problem/
     ├── layout/
     │   └── html5.html    # 覆盖 ui-default 布局，替换 favicon / og:image
     └── partials/
+        ├── footer.html     # 覆盖 ui-default 页脚，「开源」链接指向本仓库
         └── homepage/
             └── bulletin.html  # 覆盖首页公告卡片，在底部加「开发与维护」圆形头像按钮
 ```
