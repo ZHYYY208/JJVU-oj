@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { extname, join } from 'path';
 import {
-    Context, Handler, PRIV, ProblemModel, SystemModel, Types, post,
+    Context, Handler, PRIV, ProblemModel, StorageModel, SystemModel, Types, UserModel, post,
 } from 'hydrooj';
 
 const KEY_BASE_URL = 'ai-problem.baseUrl';
@@ -550,6 +550,47 @@ class JjyuojLogoHandler extends Handler {
     }
 }
 
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const BACKGROUND_MAX_BYTES = 5 * 1024 * 1024;
+const AVATAR_EXTS = ['.jpg', '.jpeg', '.png'];
+const BACKGROUND_EXTS = ['.jpg', '.jpeg', '.png', '.webp'];
+
+function uploadError(handler: Handler, message: string) {
+    handler.response.status = 400;
+    handler.response.body = { ok: false, error: message };
+}
+
+// 头像 / 个性化背景上传：一律存到本站文件存储（data/file），不访问外网，并限制大小
+class JjyuojAvatarUploadHandler extends Handler {
+    noCheckPermView = true;
+
+    async post() {
+        const file = this.request.files?.file;
+        if (!file) return uploadError(this, '请选择要上传的图片');
+        if (file.size > AVATAR_MAX_BYTES) return uploadError(this, '头像大小不能超过 2MB');
+        const ext = extname(file.originalFilename || file.name || '').toLowerCase();
+        if (!AVATAR_EXTS.includes(ext)) return uploadError(this, '头像仅支持 JPG / PNG 格式');
+        await StorageModel.put(`user/${this.user._id}/.avatar${ext}`, file.filepath, this.user._id);
+        await UserModel.setById(this.user._id, { avatar: `url:/file/${this.user._id}/.avatar${ext}` });
+        this.response.body = { ok: true, url: `/file/${this.user._id}/.avatar${ext}` };
+    }
+}
+
+class JjyuojBackgroundUploadHandler extends Handler {
+    noCheckPermView = true;
+
+    async post() {
+        const file = this.request.files?.file;
+        if (!file) return uploadError(this, '请选择要上传的图片');
+        if (file.size > BACKGROUND_MAX_BYTES) return uploadError(this, '背景图大小不能超过 5MB');
+        const ext = extname(file.originalFilename || file.name || '').toLowerCase();
+        if (!BACKGROUND_EXTS.includes(ext)) return uploadError(this, '背景图仅支持 JPG / PNG / WebP 格式');
+        await StorageModel.put(`user/${this.user._id}/.background${ext}`, file.filepath, this.user._id);
+        await UserModel.setById(this.user._id, { backgroundImage: `/file/${this.user._id}/.background${ext}` });
+        this.response.body = { ok: true, url: `/file/${this.user._id}/.background${ext}` };
+    }
+}
+
 export async function apply(ctx: Context) {
     ctx.injectUI('Nav', 'ai_problem', { prefix: 'ai-problem', displayName: 'AI 出题' }, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem', '/ai-problem', AiProblemHandler, PRIV.PRIV_EDIT_SYSTEM);
@@ -560,4 +601,6 @@ export async function apply(ctx: Context) {
     ctx.Route('jjyuoj_favicon', '/favicon.ico', JjyuojLogoHandler);
     ctx.Route('jjyuoj_avatar', '/jjyuoj-avatar.jpg', JjyuojAvatarHandler);
     ctx.Route('jjyuoj_default_avatar', '/jjyuoj-avatar/:hash', JjyuojDefaultAvatarHandler);
+    ctx.Route('jjyuoj_avatar_upload', '/home/avatar-upload', JjyuojAvatarUploadHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('jjyuoj_background_upload', '/home/background-upload', JjyuojBackgroundUploadHandler, PRIV.PRIV_USER_PROFILE);
 }

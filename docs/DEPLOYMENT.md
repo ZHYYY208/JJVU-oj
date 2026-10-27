@@ -338,6 +338,21 @@ docker exec jjvuoj-backend hydrooj cli execute \
 docker compose restart oj-backend
 ```
 
+### 用户头像 / 背景图上传（本地）
+
+个人资料页（个人主页 → 编辑资料，`/home/settings/account`）里的头像和背景图已改为**上传到本站**，
+不再提供 Gravatar / QQ / GitHub 外链选项，也不访问任何外网：
+
+- **头像**：JPG / PNG，不超过 2MB。上传后存入 Hydro 文件存储 `data/file`，以
+  `/file/<uid>/.avatar.<ext>` 引用；
+- **背景图**：JPG / PNG / WebP，不超过 5MB，同样存入本站 `data/file`，以
+  `/file/<uid>/.background.<ext>` 引用。
+
+上传由插件新增的两个路由处理：`POST /home/avatar-upload` 和 `POST /home/background-upload`，
+仅登录用户可用、只能改自己的资料。上传界面在插件覆盖的 `templates/home_settings.html` 里
+（替换了原 Gravatar 选择器）。改大小限制改 `addons/ai-problem/index.ts` 里的
+`AVATAR_MAX_BYTES` / `BACKGROUND_MAX_BYTES` 即可。
+
 ### 语言时间 / 内存倍率
 
 题目里填的 `time` / `memory` 是基础限制，判题时会乘以该语言的倍率（HydroJudge 的 `time_limit_rate` / `memory_limit_rate`）。默认配置在 `backend/seed/lang-config.js`，首次初始化写入 `hydrooj.langs`：

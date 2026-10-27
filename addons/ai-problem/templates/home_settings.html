@@ -1,0 +1,80 @@
+{% extends "layout/home_base.html" %}
+{% block home_content %}
+{% if category == "account" %}
+  <div class="section">
+    <div class="section__header">
+      <h1 class="section__title" id="avatar" data-heading>{{ _('Avatar') }}</h1>
+    </div>
+    <div class="section__body typo">
+      <div class="row">
+        <div class="medium-4 columns">
+          <img id="jjyuoj-avatar-preview" width="128" height="128" src="{{ avatarUrl(current.avatar, 128) }}" alt="{{ current.uname }}">
+        </div>
+        <div class="medium-8 columns">
+          <p>上传一张本地图片作为头像（JPG / PNG，不超过 2MB）。</p>
+          <input type="file" id="jjyuoj-avatar-file" accept=".jpg,.jpeg,.png,image/jpeg,image/png">
+          <button type="button" class="button rounded primary" id="jjyuoj-avatar-upload" data-url="{{ url('jjyuoj_avatar_upload') }}">上传头像</button>
+          <span class="help-text" id="jjyuoj-avatar-msg" style="color:#b91c1c;"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section__header">
+      <h1 class="section__title" id="background" data-heading>个人资料背景图</h1>
+    </div>
+    <div class="section__body typo">
+      <div class="row">
+        <div class="medium-4 columns">
+          <div id="jjyuoj-bg-preview" style="height: 96px; background-image: url('{{ current.backgroundImage }}'), url('/components/profile/backgrounds/1.jpg'); background-size: cover; background-position: center; border-radius: 6px;"></div>
+        </div>
+        <div class="medium-8 columns">
+          <p>上传一张本地图片作为个人主页背景（JPG / PNG / WebP，不超过 5MB）。</p>
+          <input type="file" id="jjyuoj-bg-file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+          <button type="button" class="button rounded primary" id="jjyuoj-bg-upload" data-url="{{ url('jjyuoj_background_upload') }}">上传背景图</button>
+          <span class="help-text" id="jjyuoj-bg-msg" style="color:#b91c1c;"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+<div class="section" data-heading-extract-to="#menu-item-home_{{ category }}">
+  {% include "partials/setting.html" %}
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  function bind(fileId, btnId, msgId, maxBytes) {
+    var input = document.getElementById(fileId);
+    var btn = document.getElementById(btnId);
+    var msg = document.getElementById(msgId);
+    if (!input || !btn) return;
+    btn.addEventListener('click', function () {
+      var file = input.files && input.files[0];
+      msg.textContent = '';
+      if (!file) { msg.textContent = '请先选择图片文件'; return; }
+      if (file.size > maxBytes) { msg.textContent = '图片大小超过限制'; return; }
+      var fd = new FormData();
+      fd.append('file', file);
+      btn.disabled = true;
+      fetch(btn.getAttribute('data-url'), { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (res) {
+          return res.json().catch(function () {
+            return { ok: false, error: '上传失败（HTTP ' + res.status + '）' };
+          });
+        })
+        .then(function (data) {
+          if (data && data.ok) location.reload();
+          else msg.textContent = (data && data.error) || '上传失败，请重试';
+        })
+        .catch(function () { msg.textContent = '网络错误，请重试'; })
+        .then(function () { btn.disabled = false; });
+    });
+  }
+  bind('jjyuoj-avatar-file', 'jjyuoj-avatar-upload', 'jjyuoj-avatar-msg', 2 * 1024 * 1024);
+  bind('jjyuoj-bg-file', 'jjyuoj-bg-upload', 'jjyuoj-bg-msg', 5 * 1024 * 1024);
+})();
+</script>
+{% endblock %}

@@ -176,10 +176,12 @@ addons/ai-problem/
 ├── locales/              # zh.yaml / en.yaml
 └── templates/
     ├── ai_problem.html   # 页面与结果展示
+    ├── home_settings.html  # 覆盖 ui-default 个人资料页，头像/背景改为本地上传
     ├── layout/
     │   └── html5.html    # 覆盖 ui-default 布局，替换 favicon / og:image
     └── partials/
         ├── footer.html     # 覆盖 ui-default 页脚，「开源」链接指向本仓库
+        ├── setting.html    # 覆盖设置表单，隐藏 avatar / backgroundImage 文本项
         └── homepage/
             └── bulletin.html  # 覆盖首页公告卡片，在底部加「开发与维护」圆形头像按钮
 ```
@@ -196,11 +198,16 @@ addons/ai-problem/
 | `GET /jjyuoj-logo.svg` | `JjyuojLogoHandler` | 公开（兼容旧地址） |
 | `GET /jjyuoj-avatar.jpg` | `JjyuojAvatarHandler` | 公开（首页头像，本地文件） |
 | `GET /jjyuoj-avatar/:hash` | `JjyuojDefaultAvatarHandler` | 公开（本地默认头像，承接所有 Gravatar 请求） |
+| `POST /home/avatar-upload` | `JjyuojAvatarUploadHandler` | 登录用户（上传自己的头像，JPG/PNG ≤ 2MB） |
+| `POST /home/background-upload` | `JjyuojBackgroundUploadHandler` | 登录用户（上传自己的背景图，JPG/PNG/WebP ≤ 5MB） |
 
 `JjyuojLogoHandler` 读取 `assets/logo.png` 并缓存，文件缺失时回退为内置 SVG。
 `JjyuojAvatarHandler` 读取 `assets/avatar.jpg` 并缓存（文件缺失返回 404）。
 `JjyuojDefaultAvatarHandler` 直接返回内置 SVG 默认头像：`avatar.gravatar_url` 被设为
 `/jjyuoj-avatar/`，所有 Gravatar 头像请求都落到本站此路由，全程不出网。
+`JjyuojAvatarUploadHandler` / `JjyuojBackgroundUploadHandler` 用 Hydro 的 `StorageModel` 把
+上传的图片存到本站文件存储 `data/file`（路径 `user/<uid>/.avatar.<ext>` / `.background.<ext>`），
+再写回用户的 `avatar`（`url:/file/...`）和 `backgroundImage`（`/file/...`），全程不出网。
 导航栏 logo 由系统设置 `ui-default.nav_logo_dark` 指向 `/jjyuoj-logo.png`；
 页面 `<head>` 中的 favicon / apple-touch-icon / `og:image` 通过覆盖的
 `templates/layout/html5.html` 指向同一路径。
