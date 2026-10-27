@@ -1,0 +1,55 @@
+name: jjvuoj
+
+services:
+  oj-mongo:
+    image: mongo:6
+    container_name: jjvuoj-mongo
+    restart: always
+    volumes:
+      - ./data/mongo:/data/db
+    healthcheck:
+      test: mongosh --quiet --eval "db.adminCommand('ping')" >/dev/null
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  oj-backend:
+    build: ./backend
+    image: jjvuoj/backend:latest
+    container_name: jjvuoj-backend
+    restart: always
+    depends_on:
+      oj-mongo:
+        condition: service_healthy
+    volumes:
+      - ./data/file:/data/file
+      - ./data/backend:/root/.hydro
+      - ./addons:/root/.hydro/addons:ro
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_SANDBOX_URL: http://oj-judge:5050
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: curl --silent --fail http://localhost:8888/status >/dev/null || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  oj-judge:
+    build: ./judge
+    image: jjvuoj/judge:latest
+    container_name: jjvuoj-judge
+    restart: always
+    privileged: true
+    depends_on:
+      oj-backend:
+        condition: service_healthy
+    volumes:
+      - ./judge/judge.yaml:/root/.hydro/judge.yaml
+      - ./judge/mount.yaml:/root/.hydro/mount.yaml

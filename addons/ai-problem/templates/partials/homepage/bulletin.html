@@ -1,0 +1,50 @@
+{% if domain.bulletin %}
+  <div class="section">
+    <div class="section__body typo richmedia">
+      {{ domain.bulletin|markdown|safe }}
+    </div>
+    <div class="section__body" style="text-align:center;padding-top:0">
+      <style>
+        .jjyuoj-dev { padding: 8px 0 4px; }
+        .jjyuoj-dev__label { font-size: 13px; color: #64748b; margin-bottom: 10px; }
+        .jjyuoj-dev__wrap { position: relative; display: inline-block; }
+        .jjyuoj-dev__avatar {
+          display: block; width: 56px; height: 56px;
+          border-radius: 50%; overflow: hidden;
+          box-shadow: 0 2px 6px rgba(0,0,0,.18);
+          transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .jjyuoj-dev__avatar img { width: 100%; height: 100%; display: block; }
+        .jjyuoj-dev__wrap:hover .jjyuoj-dev__avatar {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 14px rgba(0,0,0,.25);
+        }
+        .jjyuoj-dev__tip {
+          position: absolute; top: calc(100% + 12px); left: 50%;
+          transform: translateX(-50%) translateY(-4px);
+          background: #24292f; color: #fff;
+          padding: 4px 10px; border-radius: 6px;
+          font-size: 13px; line-height: 1.4; white-space: nowrap;
+          opacity: 0; pointer-events: none;
+          transition: opacity .15s ease, transform .15s ease;
+        }
+        .jjyuoj-dev__tip::after {
+          content: ''; position: absolute; bottom: 100%; left: 50%;
+          margin-left: -5px; border: 5px solid transparent; border-bottom-color: #24292f;
+        }
+        .jjyuoj-dev__wrap:hover .jjyuoj-dev__tip {
+          opacity: 1; transform: translateX(-50%) translateY(0);
+        }
+      </style>
+      <div class="jjyuoj-dev">
+        <div class="jjyuoj-dev__label">开发与维护</div>
+        <div class="jjyuoj-dev__wrap">
+          <a class="jjyuoj-dev__avatar" href="https://github.com/ZHYYY208" target="_blank" rel="noopener">
+            <img src="https://github.com/ZHYYY208.png" alt="GitHub 头像">
+          </a>
+          <span class="jjyuoj-dev__tip">ZHYYY208</span>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}

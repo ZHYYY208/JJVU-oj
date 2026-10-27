@@ -1,0 +1,9 @@
+{
+  "name": "jjyu-ai-problem",
+  "version": "1.0.0",
+  "description": "JJVUoj AI 出题插件",
+  "main": "index.ts",
+  "hydro": {
+    "cli": false
+  }
+}
