@@ -1,0 +1,154 @@
+{% extends "layout/basic.html" %}
+{% block content %}
+<div class="row">
+  <div class="medium-9 columns">
+    {% if result %}
+      <div class="section">
+        <div class="section__header">
+          <h1 class="section__title">
+            {% if result.ok %}
+              {% if result.done == 0 %}没有需要处理的题目{% else %}打标签完成（{{ result.done }} 道，用时 {{ result.elapsed }} 秒）{% endif %}
+            {% else %}打标签失败{% endif %}
+          </h1>
+        </div>
+        <div class="section__body typo">
+          {% if result.ok %}
+            {% if result.message %}<blockquote class="note">{{ result.message }}</blockquote>{% endif %}
+            {% if result.items and result.items.length %}
+              <table class="data-table">
+                <thead>
+                  <tr><th>题号</th><th>标题</th><th>标签</th><th>难度</th><th>状态</th></tr>
+                </thead>
+                <tbody>
+                  {% for it in result.items %}
+                    <tr>
+                      <td>#{{ it.pid }}</td>
+                      <td>{{ it.title }}</td>
+                      <td>{% if it.ok %}{{ it.tags|join(', ') }}{% else %}—{% endif %}</td>
+                      <td>{% if it.ok %}{{ it.difficulty }}（{{ it.difficultyLabel }}）{% else %}—{% endif %}</td>
+                      <td>{% if it.ok %}成功{% else %}失败：{{ it.error }}{% endif %}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          {% else %}
+            <blockquote class="warn">{{ result.message }}</blockquote>
+          {% endif %}
+
+          {% if result.log and result.log.length %}
+            <details>
+              <summary>处理过程</summary>
+              <ul>{% for line in result.log %}<li>{{ line }}</li>{% endfor %}</ul>
+            </details>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">AI 自动打标签 / 难度</h1>
+      </div>
+      <div class="section__body typo">
+        <p>AI 读取每道题的题面，自动判断考察的算法知识点（标签）并评定难度，然后写回题库。适合给导入的题库批量补标签和难度。</p>
+        {% if counts %}
+          <p>当前题库共 <strong>{{ counts.total }}</strong> 道题，其中 <strong>{{ counts.untagged }}</strong> 道没有标签、<strong>{{ counts.unrated }}</strong> 道没有难度。</p>
+        {% endif %}
+      </div>
+      <div class="section__body">
+        <form method="post" action="{{ url('ai_tag_run') }}" id="ai-tag-form">
+          <div class="row">
+            <div class="medium-4 columns">
+              <label>
+                处理范围
+                <select name="scope" class="select">
+                  <option value="untagged"{% if tagForm.scope == 'untagged' %} selected{% endif %}>只处理没有标签的题</option>
+                  <option value="unrated"{% if tagForm.scope == 'unrated' %} selected{% endif %}>只处理没有难度的题</option>
+                  <option value="all"{% if tagForm.scope == 'all' %} selected{% endif %}>全部题目</option>
+                </select>
+              </label>
+            </div>
+            <div class="medium-4 columns">
+              <label>
+                本次最多处理几道
+                <input name="limit" type="number" min="1" max="30" class="textbox" value="{{ tagForm.limit }}">
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="columns">
+              <label class="checkbox">
+                <input type="checkbox" name="overwriteTags"{% if tagForm.overwriteTags %} checked{% endif %}> 覆盖已有标签（默认只补空标签）
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" name="overwriteDifficulty"{% if tagForm.overwriteDifficulty %} checked{% endif %}> 覆盖已有难度（默认重新评分）
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="columns">
+              <button type="submit" class="rounded primary button" id="ai-tag-btn">开始打标签</button>
+              <span id="ai-tag-hint" style="display:none;margin-left:12px;color:#64748b">正在处理，每道题约 5–20 秒，请不要关闭页面…</span>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="medium-3 columns">
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">模型配置</h1>
+      </div>
+      <div class="section__body">
+        <p class="help-text">
+          当前：{{ modelName }}{% if hasKey %}（已配置 Key）{% else %}（未配置 Key）{% endif %}
+        </p>
+        <form method="post" action="{{ url('ai_problem_config') }}">
+          <label>
+            接口地址（OpenAI 兼容）
+            <input name="baseUrl" class="textbox" value="{{ baseUrl }}" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>
+            模型名
+            <input name="model" class="textbox" value="{{ modelName }}" placeholder="deepseek-chat">
+          </label>
+          <label>
+            API Key
+            <input name="apiKey" type="password" class="textbox" placeholder="{% if hasKey %}已保存，留空则不修改{% else %}填写你的 API Key{% endif %}" autocomplete="new-password">
+          </label>
+          <button type="submit" class="rounded button">保存配置</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">使用提示</h1>
+      </div>
+      <div class="section__body typo">
+        <ul>
+          <li>难度分 1–4：入门 / 简单 / 中等 / 困难，与「AI 出题」一致。</li>
+          <li>「只处理没有标签的题」会按题号从小到大取前 N 道，可分批跑完整个题库。</li>
+          <li>标签和难度会直接写回题目，建议先小批量（10 道）试跑一次再扩大。</li>
+          <li>远程引用题（reference）只读本地题面，结果存本地，不影响原题。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var tagForm = document.getElementById('ai-tag-form');
+    if (!tagForm) return;
+    tagForm.addEventListener('submit', function () {
+      var btn = document.getElementById('ai-tag-btn');
+      var hint = document.getElementById('ai-tag-hint');
+      if (btn) { btn.disabled = true; btn.textContent = '处理中…'; }
+      if (hint) hint.style.display = 'inline';
+    });
+  })();
+</script>
+{% endblock %}

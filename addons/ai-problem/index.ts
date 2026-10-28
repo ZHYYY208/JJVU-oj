@@ -197,6 +197,33 @@ function normalizeGenerated(raw: any, fallbackDifficulty: number): GeneratedProb
     };
 }
 
+function buildTagPrompt(title: string, content: string) {
+    const text = content.length > 6000 ? content.slice(0, 6000) : content;
+    return `请阅读下面这道程序设计 / 算法竞赛题，判断它考察的算法与知识点，并评定难度。
+
+标题：${title}
+
+题面：
+${text}
+
+要求：
+1. 标签从算法与数据结构角度给出 2-5 个简短中文标签，例如：模拟、枚举、贪心、二分、前缀和、双指针、排序、递归、动态规划、背包、图论、最短路、最小生成树、拓扑排序、搜索、DFS、BFS、字符串、哈希、数论、质数、组合数学、位运算、线段树、树状数组、并查集、堆、单调栈、单调队列 等。
+2. 标签要具体准确，不要写「算法」「编程」这类泛泛的词，也不要用题面原文里的长句。
+3. 难度用 1-4 表示：1=入门，2=简单，3=中等，4=困难，参照洛谷 / Codeforces 同类题的难度。
+4. 只输出一个 JSON 对象，不要任何额外说明：
+{ "tags": ["标签1", "标签2"], "difficulty": 2 }`;
+}
+
+function normalizeTagResult(raw: any): { tags: string[], difficulty: number } {
+    if (!raw || typeof raw !== 'object') throw new Error('模型返回结构不正确');
+    let tags: string[] = [];
+    if (Array.isArray(raw.tags)) tags = raw.tags.map((i) => String(i).trim()).filter(Boolean);
+    else if (typeof raw.tags === 'string') tags = raw.tags.split(/[,，、\s]+/).filter(Boolean);
+    tags = Array.from(new Set(tags)).slice(0, 6).map((i) => i.slice(0, 24));
+    if (!tags.length) throw new Error('模型没有给出标签');
+    return { tags, difficulty: clamp(raw.difficulty, 1, 4, 0) };
+}
+
 async function callSandbox(body: any, timeoutMs = 90000): Promise<SandboxResult> {
     const res = await fetchWithTimeout(`${SANDBOX_URL}/run`, {
         method: 'POST',
@@ -503,6 +530,98 @@ class AiGenerateHandler extends Handler {
     }
 }
 
+class AiTagHandler extends Handler {
+    async get() {
+        const problems = await ProblemModel.getMulti(
+            this.args.domainId, {}, ProblemModel.PROJECTION_LIST,
+        ).toArray();
+        let untagged = 0;
+        let unrated = 0;
+        for (const p of problems) {
+            if (!p.tag || !p.tag.length) untagged += 1;
+            if (!p.difficulty) unrated += 1;
+        }
+        this.response.template = 'ai_tag.html';
+        this.response.body = {
+            ...maskConfig(),
+            tagForm: { scope: 'untagged', limit: 10, overwriteTags: false, overwriteDifficulty: true },
+            counts: { total: problems.length, untagged, unrated },
+            result: null,
+        };
+    }
+}
+
+class AiTagRunHandler extends Handler {
+    @post('scope', Types.String, true)
+    @post('limit', Types.Int, true)
+    @post('overwriteTags', Types.Boolean, true)
+    @post('overwriteDifficulty', Types.Boolean, true)
+    async post(domainId: string, scope = 'untagged', limit = 10, overwriteTags = false, overwriteDifficulty = true) {
+        await this.limitRate('ai_tag_run', 600, 3);
+        const limited = clamp(limit, 1, 30, 10);
+        const config = getConfig();
+        const render = (result: any) => {
+            this.response.template = 'ai_tag.html';
+            this.response.body = {
+                ...maskConfig(),
+                tagForm: { scope, limit: limited, overwriteTags, overwriteDifficulty },
+                result,
+            };
+        };
+        const log: string[] = [];
+        const started = Date.now();
+        try {
+            if (!config.apiKey) throw new Error('还没有配置模型 API Key，请先在右侧「模型配置」里填写');
+            const list = await ProblemModel.getMulti(
+                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content'],
+            ).toArray();
+            let targets = list.filter((p) => {
+                if (scope === 'untagged') return !p.tag || !p.tag.length;
+                if (scope === 'unrated') return !p.difficulty;
+                return true;
+            });
+            targets = targets.slice(0, limited);
+            if (!targets.length) {
+                render({ ok: true, done: 0, items: [], elapsed: '0.0', message: '没有符合条件的题目', log });
+                return;
+            }
+            const deadline = started + Math.min(600000, 120000 + targets.length * 90000);
+            const items = [];
+            for (let i = 0; i < targets.length; i += 1) {
+                if (Date.now() > deadline) throw new Error('打标签超时，请减少数量后重试');
+                const p = targets[i];
+                const pid = p.pid || `P${p.docId}`;
+                try {
+                    const content = typeof p.content === 'string' ? p.content : '';
+                    if (content.trim().length < 10) throw new Error('题面为空或过短');
+                    const raw = await callModel(config, buildTagPrompt(p.title, content));
+                    const tagged = normalizeTagResult(raw);
+                    const $set: any = {};
+                    if (overwriteTags || !p.tag || !p.tag.length) $set.tag = tagged.tags;
+                    if (overwriteDifficulty || !p.difficulty) $set.difficulty = tagged.difficulty;
+                    await ProblemModel.edit(domainId, p.docId, $set);
+                    items.push({
+                        pid, docId: p.docId, title: p.title, ok: true,
+                        tags: tagged.tags, difficulty: tagged.difficulty,
+                        difficultyLabel: DIFFICULTY_LABELS[tagged.difficulty] || String(tagged.difficulty),
+                    });
+                    log.push(`#${pid}《${p.title}》→ ${tagged.tags.join(', ')}（${DIFFICULTY_LABELS[tagged.difficulty] || tagged.difficulty}）`);
+                } catch (e: any) {
+                    items.push({ pid, docId: p.docId, title: p.title, ok: false, error: e?.message || String(e) });
+                    log.push(`#${pid}《${p.title}》失败：${e?.message || e}`);
+                }
+            }
+            const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+            render({ ok: true, done: items.length, items, elapsed, log });
+        } catch (e: any) {
+            log.push(`失败：${e?.message || e}`);
+            let message = e?.message || String(e);
+            if (e?.name === 'AbortError') message = '模型请求超时（180 秒），请重试';
+            render({ ok: false, message, log });
+        }
+    }
+}
+
 const LOGO_PATHS = [
     join(__dirname, 'assets', 'logo.png'),
     '/root/.hydro/addons/ai-problem/assets/logo.png',
@@ -779,9 +898,12 @@ export async function apply(ctx: Context) {
     });
 
     ctx.injectUI('Nav', 'ai_problem', { prefix: 'ai-problem', displayName: 'AI 出题' }, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.injectUI('Nav', 'ai_tag', { prefix: 'ai-tag', displayName: 'AI 打标签' }, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem', '/ai-problem', AiProblemHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem_generate', '/ai-problem/generate', AiGenerateHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem_config', '/ai-problem/config', AiConfigHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('ai_tag', '/ai-tag', AiTagHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('ai_tag_run', '/ai-tag/run', AiTagRunHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('jjyuoj_logo_png', '/jjyuoj-logo.png', JjyuojLogoHandler);
     ctx.Route('jjyuoj_logo_svg', '/jjyuoj-logo.svg', JjyuojLogoHandler);
     ctx.Route('jjyuoj_favicon', '/favicon.ico', JjyuojLogoHandler);
