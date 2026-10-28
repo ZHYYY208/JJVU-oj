@@ -689,20 +689,38 @@ function cleanFpsMath(html: string) {
     return out;
 }
 
+// FPS/LibreOJ 导出题面是整张页面的 HTML 片段：每个 section（题目描述/输入格式/输出格式/样例/数据范围）都包在
+// <div class="ui bottom attached segment font-content"><div style="...">…</div></div> 里，
+// section 之间还夹着页面外壳 </div></div></div></div><div class="row"><div class="column">。
+// 这些外壳在 Hydro 渲染时会被 ensureTag 当作无法闭合的标签，转义成字面 </div> 文本显示出来。
+// 这里把「section 包裹开头」和「section 之间的外壳」都剥掉，只留正文（幂等）。
+const FPS_WRAPPER_OPEN = '<div class="ui bottom attached segment font-content"><div style="position: relative; overflow: hidden; ">';
+const FPS_BOUNDARY = /<\/div><\/div>\s*<\/div>\s*<\/div>\s*<div class="row">\s*<div class="column">\s*/g;
+
+function stripFpsWrapper(html: string) {
+    const s = String(html || '');
+    if (!s.startsWith(FPS_WRAPPER_OPEN)) return s;
+    return s.split(FPS_WRAPPER_OPEN).join('').replace(FPS_BOUNDARY, '\n');
+}
+
+function cleanFpsContent(html: string) {
+    return cleanFpsMath(stripFpsWrapper(html));
+}
+
 export async function apply(ctx: Context) {
     ctx.on('problem/before-edit', ($set) => {
-        if (typeof $set.content === 'string' && $set.content.includes('<span class="katex">')) {
-            $set.content = cleanFpsMath($set.content);
-        }
+        if (typeof $set.content !== 'string') return;
+        const cleaned = cleanFpsContent($set.content);
+        if (cleaned !== $set.content) $set.content = cleaned;
     });
     ctx.on('problem/add', async (doc, docId) => {
         const original = typeof doc.content === 'string' ? doc.content : '';
-        const cleaned = cleanFpsMath(original);
+        const cleaned = cleanFpsContent(original);
         if (cleaned === original) return;
         try {
             await ProblemModel.edit(doc.domainId, docId, { content: cleaned });
         } catch (e: any) {
-            console.error('[ai-problem] clean FPS math failed for #%d: %s', docId, e?.message || e);
+            console.error('[ai-problem] clean FPS content failed for #%d: %s', docId, e?.message || e);
         }
     });
 

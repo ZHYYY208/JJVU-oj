@@ -1,4 +1,6 @@
-// 一次性修复：把 FPS/LibreOJ 导入题面里的预渲染 KaTeX 还原成 Hydro 的 \(…\) / \[…\] 源码（幂等，可重复执行）
+// 一次性修复：把 FPS/LibreOJ 导入题面还原干净（幂等，可重复执行）
+// 1) 剥掉 LibreOJ 页面外壳（开头/结尾的多余 div 包装）
+// 2) 把预渲染 KaTeX 还原成 Hydro 的 \(…\) / \[…\] 源码
 // katex-mathml 里是「渲染后的 MathML 文本 + LaTeX 源码」，katex-html 里是同一份渲染文本（含零宽空格）。
 // 用 katex-html 的可视文本做前缀剥出 LaTeX；前缀对不上（分式/求和打乱顺序、根号隐式等）时按长度/根号数回退。
 function stripTags(s) {
@@ -87,12 +89,23 @@ function cleanFpsMath(html) {
   }
   return out;
 }
+// 剥掉 LibreOJ 页面外壳：每个 section 的包裹开头 + section 之间的页面外壳（</div></div></div></div><div class="row"><div class="column">）
+const FPS_WRAPPER_OPEN = '<div class="ui bottom attached segment font-content"><div style="position: relative; overflow: hidden; ">';
+const FPS_BOUNDARY = /<\/div><\/div>\s*<\/div>\s*<\/div>\s*<div class="row">\s*<div class="column">\s*/g;
+function stripFpsWrapper(html) {
+  const s = String(html || '');
+  if (!s.startsWith(FPS_WRAPPER_OPEN)) return s;
+  return s.split(FPS_WRAPPER_OPEN).join('').replace(FPS_BOUNDARY, '\n');
+}
+function cleanFpsContent(html) {
+  return cleanFpsMath(stripFpsWrapper(html));
+}
 
 const docs = await ProblemModel.getMulti('system', {}, ['docId', 'content']).toArray();
 let fixed = 0;
 for (const d of docs) {
   const c = typeof d.content === 'string' ? d.content : '';
-  const next = cleanFpsMath(c);
+  const next = cleanFpsContent(c);
   if (next !== c) {
     await ProblemModel.edit('system', d.docId, { content: next });
     fixed++;
