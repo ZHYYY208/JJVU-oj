@@ -1,4 +1,4 @@
-const domainId = 'jjyu';
+const domainId = 'system';
 const uid = 1;
 
 async function upsertProblem(pid, title, content, tags, difficulty, tests) {
@@ -111,6 +111,5 @@ const hid = await upsertContest(
 
 const homeContent = require('fs').readFileSync('/root/seed/home.md', 'utf8');
 await DomainModel.edit('system', { bulletin: homeContent });
-await DomainModel.edit(domainId, { bulletin: homeContent, _join: { method: 1, role: 'default' } });
 
 console.log('seed-ok', JSON.stringify({ problems: [d1, d2], contests: [tid, hid] }));

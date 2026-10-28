@@ -9,7 +9,7 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
  && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g --registry=$NPM_REGISTRY \
-      pm2 hydrooj@5.0.7 @hydrooj/ui-default@4.58.5
+      pm2 hydrooj@5.0.7 @hydrooj/ui-default@4.58.5 @hydrooj/fps-importer@1.6.0
 
 COPY entrypoint.sh /root/entrypoint.sh
 RUN chmod +x /root/entrypoint.sh

@@ -12,7 +12,7 @@ const fs = require("fs");
 const p = "/root/.hydro/addon.json";
 let list = [];
 try { list = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {}
-for (const item of ["@hydrooj/ui-default", "/root/.hydro/addons/ai-problem"]) {
+for (const item of ["@hydrooj/ui-default", "/root/.hydro/addons/ai-problem", "@hydrooj/fps-importer"]) {
   if (!list.includes(item)) list.push(item);
 }
 fs.writeFileSync(p, JSON.stringify(list, null, 2));
@@ -38,8 +38,6 @@ if [ ! -f "$ROOT/first" ]; then
   printf '%s\n' "$ADMIN_PASS" > "$ROOT/admin-password.txt"
   chmod 600 "$ROOT/admin-password.txt"
 
-  hydrooj cli domain add jjyu 1 "JJVUoj" "九江职业大学在线评测系统" 2>/dev/null || true
-  hydrooj cli execute "await DomainModel.edit('jjyu', { _join: { method: 1, role: 'default' } })" 2>/dev/null || true
   hydrooj cli system set server.host 0.0.0.0 2>/dev/null || true
   hydrooj cli system set server.name "JJVUoj" 2>/dev/null || true
   hydrooj cli system set ui-default.nav_logo_dark "/jjyuoj-logo.png" 2>/dev/null || true

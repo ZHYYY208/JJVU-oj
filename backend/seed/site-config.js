@@ -4,5 +4,4 @@
 // 3) 域头像指向本地 logo
 await SystemModel.set('avatar.gravatar_url', '/jjyuoj-avatar/');
 await DomainModel.edit('system', { name: 'JJVUoj', avatar: 'url:/jjyuoj-logo.png' });
-await DomainModel.edit('jjyu', { avatar: 'url:/jjyuoj-logo.png' });
 console.log('site-config-ok');
