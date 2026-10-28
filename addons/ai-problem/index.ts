@@ -550,7 +550,7 @@ class AiTagHandler extends Handler {
         this.response.template = 'ai_tag.html';
         this.response.body = {
             ...maskConfig(),
-            tagForm: { scope: 'notAiTagged', limit: 10, overwriteTags: false, overwriteDifficulty: true },
+            tagForm: { scope: 'notAiTagged', limit: 10, overwriteTags: false, overwriteDifficulty: true, pids: '' },
             counts: { total: problems.length, untagged, unrated, notAiTagged },
             result: null,
         };
@@ -562,7 +562,8 @@ class AiTagRunHandler extends Handler {
     @post('limit', Types.Int, true)
     @post('overwriteTags', Types.Boolean, true)
     @post('overwriteDifficulty', Types.Boolean, true)
-    async post(domainId: string, scope = 'notAiTagged', limit = 10, overwriteTags = false, overwriteDifficulty = true) {
+    @post('pids', Types.String, true)
+    async post(domainId: string, scope = 'notAiTagged', limit = 10, overwriteTags = false, overwriteDifficulty = true, pids = '') {
         await this.limitRate('ai_tag_run', 600, 3);
         const limited = clamp(limit, 1, 30, 10);
         const config = getConfig();
@@ -570,7 +571,7 @@ class AiTagRunHandler extends Handler {
             this.response.template = 'ai_tag.html';
             this.response.body = {
                 ...maskConfig(),
-                tagForm: { scope, limit: limited, overwriteTags, overwriteDifficulty },
+                tagForm: { scope, limit: limited, overwriteTags, overwriteDifficulty, pids },
                 result,
             };
         };
@@ -581,13 +582,31 @@ class AiTagRunHandler extends Handler {
             const list = await ProblemModel.getMulti(
                 domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'aiTagged', 'aiSkipped'],
             ).toArray();
-            let targets = list.filter((p) => {
-                if (scope === 'untagged') return !p.tag || !p.tag.length;
-                if (scope === 'unrated') return !p.difficulty;
-                if (scope === 'notAiTagged') return !(p as any).aiTagged && !(p as any).aiSkipped;
-                return true;
-            });
-            targets = targets.slice(0, limited);
+            const wanted = (pids || '').split(/[\s,，、;；]+/).map((s) => s.trim()).filter(Boolean).map((s) => s.toUpperCase());
+            let targets: any[];
+            if (wanted.length) {
+                const want = new Set(wanted);
+                targets = list.filter((p) => {
+                    const pid = String(p.pid || '').toUpperCase();
+                    const docIdStr = String(p.docId);
+                    const bare = pid.replace(/^[^0-9]+/, '');
+                    return want.has(docIdStr) || want.has(pid) || (bare && want.has(bare));
+                });
+                if (!targets.length) {
+                    render({ ok: true, done: 0, items: [], elapsed: '0.0', message: '没有找到这些题号对应的题目', log });
+                    return;
+                }
+                overwriteTags = true;
+                overwriteDifficulty = true;
+            } else {
+                targets = list.filter((p) => {
+                    if (scope === 'untagged') return !p.tag || !p.tag.length;
+                    if (scope === 'unrated') return !p.difficulty;
+                    if (scope === 'notAiTagged') return !(p as any).aiTagged && !(p as any).aiSkipped;
+                    return true;
+                });
+                targets = targets.slice(0, limited);
+            }
             if (!targets.length) {
                 render({ ok: true, done: 0, items: [], elapsed: '0.0', message: '没有符合条件的题目', log });
                 return;

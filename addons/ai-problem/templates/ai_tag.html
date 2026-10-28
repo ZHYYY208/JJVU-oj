@@ -79,6 +79,15 @@
           </div>
           <div class="row">
             <div class="columns">
+              <label>
+                指定题号打标签（可选）
+                <input name="pids" type="text" class="textbox" value="{{ tagForm.pids }}" placeholder="留空则按上面范围处理；多个题号用逗号/空格分隔，如 1001, 1005">
+              </label>
+              <p class="help-text">填了题号就只处理这些题，并强制覆盖已有标签和难度（适合重打之前失败的题）。题号可用数字 ID（如 1001）或带前缀的 PID（如 P1001）。</p>
+            </div>
+          </div>
+          <div class="row">
+            <div class="columns">
               <label class="checkbox">
                 <input type="checkbox" name="overwriteTags"{% if tagForm.overwriteTags %} checked{% endif %}> 覆盖已有标签（默认只补空标签）
               </label>
@@ -90,7 +99,7 @@
           <div class="row">
             <div class="columns">
               <button type="submit" class="rounded primary button" id="ai-tag-btn">开始打标签</button>
-              <span id="ai-tag-hint" style="display:none;margin-left:12px;color:#64748b">正在处理，每道题约 5–20 秒，请不要关闭页面…</span>
+              <span id="ai-tag-hint" style="display:none;margin-left:12px;color:#64748b">正在处理，每道题约 1–5 秒，请不要关闭页面…</span>
             </div>
           </div>
         </form>
@@ -134,6 +143,7 @@
           <li>难度分 1–4：入门 / 简单 / 中等 / 困难，与「AI 出题」一致。</li>
           <li>推荐用「只处理还没被 AI 打标签的题」，每次跑完一批、下次自动接着没打过的题继续，直到全部打完。</li>
           <li>最多 3 道题同时处理，失败会自动重试一次；题面为空或过短的题会标记为「跳过」，不再重复尝试。</li>
+          <li>想重打之前失败的题，在「指定题号」里填那些题号再点开始即可（会强制覆盖标签和难度）。</li>
           <li>标签和难度会直接写回题目，建议先小批量（10 道）试跑一次再扩大。</li>
           <li>远程引用题（reference）只读本地题面，结果存本地，不影响原题。</li>
         </ul>
