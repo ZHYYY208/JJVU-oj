@@ -533,7 +533,7 @@ class AiGenerateHandler extends Handler {
 class AiTagHandler extends Handler {
     async get() {
         const problems = await ProblemModel.getMulti(
-            this.args.domainId, {}, [...ProblemModel.PROJECTION_LIST, 'aiTagged'],
+            this.args.domainId, {}, [...ProblemModel.PROJECTION_LIST, 'aiTagged', 'aiSkipped'],
         ).toArray();
         let untagged = 0;
         let unrated = 0;
@@ -541,7 +541,7 @@ class AiTagHandler extends Handler {
         for (const p of problems) {
             if (!p.tag || !p.tag.length) untagged += 1;
             if (!p.difficulty) unrated += 1;
-            if (!(p as any).aiTagged) notAiTagged += 1;
+            if (!(p as any).aiTagged && !(p as any).aiSkipped) notAiTagged += 1;
         }
         this.response.template = 'ai_tag.html';
         this.response.body = {
@@ -575,12 +575,12 @@ class AiTagRunHandler extends Handler {
         try {
             if (!config.apiKey) throw new Error('还没有配置模型 API Key，请先在右侧「模型配置」里填写');
             const list = await ProblemModel.getMulti(
-                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'aiTagged'],
+                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'aiTagged', 'aiSkipped'],
             ).toArray();
             let targets = list.filter((p) => {
                 if (scope === 'untagged') return !p.tag || !p.tag.length;
                 if (scope === 'unrated') return !p.difficulty;
-                if (scope === 'notAiTagged') return !(p as any).aiTagged;
+                if (scope === 'notAiTagged') return !(p as any).aiTagged && !(p as any).aiSkipped;
                 return true;
             });
             targets = targets.slice(0, limited);
@@ -588,33 +588,46 @@ class AiTagRunHandler extends Handler {
                 render({ ok: true, done: 0, items: [], elapsed: '0.0', message: '没有符合条件的题目', log });
                 return;
             }
-            const deadline = started + Math.min(600000, 120000 + targets.length * 90000);
-            const items = [];
-            for (let i = 0; i < targets.length; i += 1) {
-                if (Date.now() > deadline) throw new Error('打标签超时，请减少数量后重试');
-                const p = targets[i];
-                const pid = p.pid || `P${p.docId}`;
-                try {
-                    const content = typeof p.content === 'string' ? p.content : '';
-                    if (content.trim().length < 10) throw new Error('题面为空或过短');
-                    const raw = await callModel(config, buildTagPrompt(p.title, content));
-                    const tagged = normalizeTagResult(raw);
-                    const $set: any = {};
-                    if (overwriteTags || !p.tag || !p.tag.length) $set.tag = tagged.tags;
-                    if (overwriteDifficulty || !p.difficulty) $set.difficulty = tagged.difficulty;
-                    $set.aiTagged = true;
-                    await ProblemModel.edit(domainId, p.docId, $set);
-                    items.push({
-                        pid, docId: p.docId, title: p.title, ok: true,
-                        tags: tagged.tags, difficulty: tagged.difficulty,
-                        difficultyLabel: DIFFICULTY_LABELS[tagged.difficulty] || String(tagged.difficulty),
-                    });
-                    log.push(`#${pid}《${p.title}》→ ${tagged.tags.join(', ')}（${DIFFICULTY_LABELS[tagged.difficulty] || tagged.difficulty}）`);
-                } catch (e: any) {
-                    items.push({ pid, docId: p.docId, title: p.title, ok: false, error: e?.message || String(e) });
-                    log.push(`#${pid}《${p.title}》失败：${e?.message || e}`);
+            const items: any[] = [];
+            const queue = targets.slice();
+            const worker = async () => {
+                while (queue.length) {
+                    const p = queue.shift()!;
+                    const pid = p.pid || `P${p.docId}`;
+                    try {
+                        const content = typeof p.content === 'string' ? p.content : '';
+                        if (content.trim().length < 10) {
+                            await ProblemModel.edit(domainId, p.docId, { aiSkipped: true } as any);
+                            items.push({ pid, docId: p.docId, title: p.title, skipped: true, error: '题面为空或过短，已跳过' });
+                            log.push(`#${pid}《${p.title}》跳过：题面为空或过短`);
+                            continue;
+                        }
+                        const prompt = buildTagPrompt(p.title, content);
+                        let raw: any;
+                        try {
+                            raw = await callModel(config, prompt);
+                        } catch (firstErr) {
+                            raw = await callModel(config, prompt);
+                        }
+                        const tagged = normalizeTagResult(raw);
+                        const $set: any = { aiTagged: true };
+                        if (overwriteTags || !p.tag || !p.tag.length) $set.tag = tagged.tags;
+                        if (overwriteDifficulty || !p.difficulty) $set.difficulty = tagged.difficulty;
+                        await ProblemModel.edit(domainId, p.docId, $set);
+                        items.push({
+                            pid, docId: p.docId, title: p.title, ok: true,
+                            tags: tagged.tags, difficulty: tagged.difficulty,
+                            difficultyLabel: DIFFICULTY_LABELS[tagged.difficulty] || String(tagged.difficulty),
+                        });
+                        log.push(`#${pid}《${p.title}》→ ${tagged.tags.join(', ')}（${DIFFICULTY_LABELS[tagged.difficulty] || tagged.difficulty}）`);
+                    } catch (e: any) {
+                        items.push({ pid, docId: p.docId, title: p.title, ok: false, error: e?.message || String(e) });
+                        log.push(`#${pid}《${p.title}》失败：${e?.message || e}`);
+                    }
                 }
-            }
+            };
+            await Promise.all(Array.from({ length: Math.min(3, targets.length) }, () => worker()));
+            items.sort((a, b) => a.docId - b.docId);
             const elapsed = ((Date.now() - started) / 1000).toFixed(1);
             render({ ok: true, done: items.length, items, elapsed, log });
         } catch (e: any) {

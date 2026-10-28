@@ -26,7 +26,7 @@
                       <td>{{ it.title }}</td>
                       <td>{% if it.ok %}{{ it.tags|join(', ') }}{% else %}—{% endif %}</td>
                       <td>{% if it.ok %}{{ it.difficulty }}（{{ it.difficultyLabel }}）{% else %}—{% endif %}</td>
-                      <td>{% if it.ok %}成功{% else %}失败：{{ it.error }}{% endif %}</td>
+                      <td>{% if it.ok %}成功{% elif it.skipped %}跳过{% else %}失败：{{ it.error }}{% endif %}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -133,6 +133,7 @@
         <ul>
           <li>难度分 1–4：入门 / 简单 / 中等 / 困难，与「AI 出题」一致。</li>
           <li>推荐用「只处理还没被 AI 打标签的题」，每次跑完一批、下次自动接着没打过的题继续，直到全部打完。</li>
+          <li>最多 3 道题同时处理，失败会自动重试一次；题面为空或过短的题会标记为「跳过」，不再重复尝试。</li>
           <li>标签和难度会直接写回题目，建议先小批量（10 道）试跑一次再扩大。</li>
           <li>远程引用题（reference）只读本地题面，结果存本地，不影响原题。</li>
         </ul>
