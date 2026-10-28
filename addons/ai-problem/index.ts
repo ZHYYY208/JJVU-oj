@@ -94,6 +94,7 @@ async function callModel(config: AiConfig, prompt: string) {
         ],
         temperature: 0.3,
         max_tokens: 8192,
+        thinking: { type: 'disabled' },
         response_format: { type: 'json_object' },
     };
     let res = await fetchWithTimeout(url, {
@@ -105,7 +106,9 @@ async function callModel(config: AiConfig, prompt: string) {
         body: JSON.stringify(payload),
     }, 180000);
     if (!res.ok && res.status === 400) {
+        // 某些 OpenAI 兼容服务不认识 thinking / response_format，逐个移除后重试
         delete payload.response_format;
+        delete payload.thinking;
         res = await fetchWithTimeout(url, {
             method: 'POST',
             headers: {
@@ -123,8 +126,9 @@ async function callModel(config: AiConfig, prompt: string) {
     } catch (e) {
         throw new Error(`模型返回内容无法解析: ${text.slice(0, 200)}`);
     }
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error('模型返回内容为空，请检查模型名（建议使用 deepseek-chat）');
+    const message = data.choices?.[0]?.message || {};
+    const content = message.content || message.reasoning_content;
+    if (!content) throw new Error('模型返回内容为空，请重试；若频繁出现请检查模型名（DeepSeek 现为 deepseek-flash）');
     return extractJson(content);
 }
 
