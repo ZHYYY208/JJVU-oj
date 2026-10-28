@@ -533,19 +533,21 @@ class AiGenerateHandler extends Handler {
 class AiTagHandler extends Handler {
     async get() {
         const problems = await ProblemModel.getMulti(
-            this.args.domainId, {}, ProblemModel.PROJECTION_LIST,
+            this.args.domainId, {}, [...ProblemModel.PROJECTION_LIST, 'aiTagged'],
         ).toArray();
         let untagged = 0;
         let unrated = 0;
+        let notAiTagged = 0;
         for (const p of problems) {
             if (!p.tag || !p.tag.length) untagged += 1;
             if (!p.difficulty) unrated += 1;
+            if (!(p as any).aiTagged) notAiTagged += 1;
         }
         this.response.template = 'ai_tag.html';
         this.response.body = {
             ...maskConfig(),
-            tagForm: { scope: 'untagged', limit: 10, overwriteTags: false, overwriteDifficulty: true },
-            counts: { total: problems.length, untagged, unrated },
+            tagForm: { scope: 'notAiTagged', limit: 10, overwriteTags: false, overwriteDifficulty: true },
+            counts: { total: problems.length, untagged, unrated, notAiTagged },
             result: null,
         };
     }
@@ -556,7 +558,7 @@ class AiTagRunHandler extends Handler {
     @post('limit', Types.Int, true)
     @post('overwriteTags', Types.Boolean, true)
     @post('overwriteDifficulty', Types.Boolean, true)
-    async post(domainId: string, scope = 'untagged', limit = 10, overwriteTags = false, overwriteDifficulty = true) {
+    async post(domainId: string, scope = 'notAiTagged', limit = 10, overwriteTags = false, overwriteDifficulty = true) {
         await this.limitRate('ai_tag_run', 600, 3);
         const limited = clamp(limit, 1, 30, 10);
         const config = getConfig();
@@ -573,11 +575,12 @@ class AiTagRunHandler extends Handler {
         try {
             if (!config.apiKey) throw new Error('还没有配置模型 API Key，请先在右侧「模型配置」里填写');
             const list = await ProblemModel.getMulti(
-                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content'],
+                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'aiTagged'],
             ).toArray();
             let targets = list.filter((p) => {
                 if (scope === 'untagged') return !p.tag || !p.tag.length;
                 if (scope === 'unrated') return !p.difficulty;
+                if (scope === 'notAiTagged') return !(p as any).aiTagged;
                 return true;
             });
             targets = targets.slice(0, limited);
@@ -599,6 +602,7 @@ class AiTagRunHandler extends Handler {
                     const $set: any = {};
                     if (overwriteTags || !p.tag || !p.tag.length) $set.tag = tagged.tags;
                     if (overwriteDifficulty || !p.difficulty) $set.difficulty = tagged.difficulty;
+                    $set.aiTagged = true;
                     await ProblemModel.edit(domainId, p.docId, $set);
                     items.push({
                         pid, docId: p.docId, title: p.title, ok: true,
