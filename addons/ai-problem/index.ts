@@ -11,7 +11,6 @@ const KEY_MODEL = 'ai-problem.model';
 const SANDBOX_URL = process.env.AI_SANDBOX_URL || 'http://oj-judge:5050';
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
-const GENERATION_DEADLINE_MS = 240 * 1000;
 
 const DIFFICULTY_LABELS: Record<number, string> = {
     1: '入门',
@@ -129,11 +128,12 @@ async function callModel(config: AiConfig, prompt: string) {
     return extractJson(content);
 }
 
-function buildPrompt(topic: string, difficulty: number, timeLimitMs: number, memoryLimitMb: number, testCount: number) {
+function buildPrompt(topic: string, difficulty: number, timeLimitMs: number, memoryLimitMb: number, testCount: number, batchIndex = 0, batchTotal = 1) {
     return `请为高校程序设计课程出一道在线评测题目，并给出可直接运行的标准程序和数据生成器。
 
 题目要求 / 主题：
 ${topic}
+${batchTotal > 1 ? `\n本批次共 ${batchTotal} 道题，这是第 ${batchIndex} 道。请与其他题目在考点或数据范围上保持明显区分，避免雷同。\n` : ''}
 
 难度：${DIFFICULTY_LABELS[difficulty] || '中等'}
 时间限制：${timeLimitMs} ms
@@ -309,6 +309,78 @@ function fillSamples(statement: string, sampleIn: string, sampleOut: string, war
     return content;
 }
 
+interface GenForm {
+    topic: string;
+    difficulty: number;
+    tags: string;
+    timeLimit: number;
+    memoryLimit: number;
+    testCount: number;
+    count: number;
+}
+
+async function materializeProblem(
+    raw: any,
+    genForm: GenForm,
+    domainId: string,
+    ownerId: number,
+    log: string[],
+    warnings: string[],
+    deadline: number,
+) {
+    const generated = normalizeGenerated(raw, genForm.difficulty);
+    log.push(`题面已生成：《${generated.title}》`);
+
+    log.push('编译标准程序…');
+    const stdFileId = await compileStandard(generated.standardCode);
+    log.push('标准程序编译通过');
+
+    const inputs: string[] = [];
+    const outputs: string[] = [];
+    try {
+        for (let seed = 1; seed <= genForm.testCount; seed += 1) {
+            if (Date.now() > deadline) throw new Error('生成测试数据超时，请减少题目数量或测试点后重试');
+            const input = await runGenerator(generated.generator, seed);
+            if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error(`seed=${seed} 生成的数据超过 8MB`);
+            const output = await runStandard(stdFileId, input, genForm.timeLimit, genForm.memoryLimit);
+            inputs.push(input);
+            outputs.push(output);
+            log.push(`《${generated.title}》测试点 ${seed}/${genForm.testCount} 完成（输入 ${(Buffer.byteLength(input) / 1024).toFixed(1)} KB）`);
+        }
+    } finally {
+        await sandboxDeleteFile(stdFileId);
+    }
+
+    const statement = fillSamples(generated.statement, inputs[0], outputs[0], warnings);
+    const finalTags = genForm.tags
+        ? genForm.tags.split(/[,，、\s]+/).filter(Boolean).slice(0, 6)
+        : generated.tags;
+
+    log.push('写入题库…');
+    const docId = await ProblemModel.add(
+        domainId, '', generated.title, statement, ownerId,
+        finalTags, { difficulty: generated.difficulty, hidden: false },
+    ) as number;
+    const configYaml = `time: ${genForm.timeLimit}ms\nmemory: ${genForm.memoryLimit}m\n`;
+    await ProblemModel.edit(domainId, docId, { config: configYaml });
+    await ProblemModel.addTestdata(domainId, docId, 'config.yaml', Buffer.from(configYaml));
+    for (let i = 0; i < inputs.length; i += 1) {
+        await ProblemModel.addTestdata(domainId, docId, `${i + 1}.in`, Buffer.from(inputs[i]));
+        await ProblemModel.addTestdata(domainId, docId, `${i + 1}.out`, Buffer.from(outputs[i]));
+    }
+
+    return {
+        pid: docId,
+        title: generated.title,
+        notes: generated.notes,
+        tags: finalTags,
+        difficulty: generated.difficulty,
+        testCount: inputs.length,
+        sampleIn: inputs[0].trimEnd().slice(0, 2000),
+        sampleOut: outputs[0].trimEnd().slice(0, 2000),
+    };
+}
+
 function maskConfig() {
     const config = getConfig();
     return {
@@ -323,7 +395,7 @@ class AiProblemHandler extends Handler {
         this.response.template = 'ai_problem.html';
         this.response.body = {
             ...maskConfig(),
-            genForm: { topic: '', difficulty: 3, tags: '', timeLimit: 1000, memoryLimit: 256, testCount: 10 },
+            genForm: { topic: '', difficulty: 3, tags: '', timeLimit: 1000, memoryLimit: 256, testCount: 10, count: 1 },
             result: null,
         };
     }
@@ -348,23 +420,24 @@ class AiGenerateHandler extends Handler {
     @post('timeLimit', Types.Int, true)
     @post('memoryLimit', Types.Int, true)
     @post('testCount', Types.Int, true)
+    @post('count', Types.Int, true)
     async post(
         domainId: string, topic: string, difficulty = 3, tags = '',
-        timeLimit = 1000, memoryLimit = 256, testCount = 10,
+        timeLimit = 1000, memoryLimit = 256, testCount = 10, count = 1,
     ) {
         await this.limitRate('ai_problem_generate', 600, 5);
-        const genForm = {
+        const genForm: GenForm = {
             topic: (topic || '').trim(),
             difficulty: clamp(difficulty, 1, 4, 3),
             tags: (tags || '').trim(),
             timeLimit: clamp(timeLimit, 100, 10000, 1000),
             memoryLimit: clamp(memoryLimit, 32, 1024, 256),
             testCount: clamp(testCount, 3, 15, 10),
+            count: clamp(count, 1, 5, 1),
         };
         const log: string[] = [];
         const warnings: string[] = [];
         const started = Date.now();
-        const deadline = started + GENERATION_DEADLINE_MS;
         const config = getConfig();
         const render = (result: any) => {
             this.response.template = 'ai_problem.html';
@@ -379,67 +452,48 @@ class AiGenerateHandler extends Handler {
             if (!versionRes.ok) throw new Error('判题沙箱不可用，请确认 oj-judge 容器已启动');
             log.push('判题沙箱连接正常');
 
-            log.push(`调用模型 ${config.model} 生成题面与代码…`);
-            const raw = await callModel(config, buildPrompt(
-                genForm.topic, genForm.difficulty, genForm.timeLimit, genForm.memoryLimit, genForm.testCount,
-            ));
-            if (Date.now() > deadline) throw new Error('生成超时，请减少测试点后重试');
-            const generated = normalizeGenerated(raw, genForm.difficulty);
-            log.push(`题面已生成：《${generated.title}》`);
+            const deadline = started + Math.min(600000, 120000 + genForm.count * 120000);
+            log.push(`调用模型 ${config.model} 生成 ${genForm.count} 道题…`);
+            const raws = await Promise.all(Array.from({ length: genForm.count }, (_, i) => callModel(
+                config,
+                buildPrompt(genForm.topic, genForm.difficulty, genForm.timeLimit, genForm.memoryLimit, genForm.testCount, i + 1, genForm.count),
+            )));
+            if (Date.now() > deadline) throw new Error('生成超时，请减少题目数量后重试');
 
-            log.push('编译标准程序…');
-            const stdFileId = await compileStandard(generated.standardCode);
-            log.push('标准程序编译通过');
-
-            const inputs: string[] = [];
-            const outputs: string[] = [];
-            try {
-                for (let seed = 1; seed <= genForm.testCount; seed += 1) {
-                    if (Date.now() > deadline) throw new Error('生成测试数据超时，请减少测试点后重试');
-                    const input = await runGenerator(generated.generator, seed);
-                    if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error(`seed=${seed} 生成的数据超过 8MB`);
-                    const output = await runStandard(stdFileId, input, genForm.timeLimit, genForm.memoryLimit);
-                    inputs.push(input);
-                    outputs.push(output);
-                    log.push(`测试点 ${seed}/${genForm.testCount} 完成（输入 ${(Buffer.byteLength(input) / 1024).toFixed(1)} KB）`);
-                }
-            } finally {
-                await sandboxDeleteFile(stdFileId);
+            const problems = [];
+            for (let i = 0; i < raws.length; i += 1) {
+                const p = await materializeProblem(raws[i], genForm, domainId, this.user._id, log, warnings, deadline);
+                problems.push(p);
+                log.push(`第 ${i + 1}/${genForm.count} 道已创建：#${p.pid}`);
             }
 
-            const statement = fillSamples(generated.statement, inputs[0], outputs[0], warnings);
-            const finalTags = genForm.tags
-                ? genForm.tags.split(/[,，、\s]+/).filter(Boolean).slice(0, 6)
-                : generated.tags;
-
-            log.push('写入题库…');
-            const docId = await ProblemModel.add(
-                domainId, '', generated.title, statement, this.user._id,
-                finalTags, { difficulty: generated.difficulty, hidden: false },
-            ) as number;
-            const configYaml = `time: ${genForm.timeLimit}ms\nmemory: ${genForm.memoryLimit}m\n`;
-            await ProblemModel.edit(domainId, docId, { config: configYaml });
-            await ProblemModel.addTestdata(domainId, docId, 'config.yaml', Buffer.from(configYaml));
-            for (let i = 0; i < inputs.length; i += 1) {
-                await ProblemModel.addTestdata(domainId, docId, `${i + 1}.in`, Buffer.from(inputs[i]));
-                await ProblemModel.addTestdata(domainId, docId, `${i + 1}.out`, Buffer.from(outputs[i]));
+            const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+            if (genForm.count === 1) {
+                const p = problems[0];
+                render({
+                    ok: true,
+                    pid: p.pid,
+                    title: p.title,
+                    notes: p.notes,
+                    tags: p.tags,
+                    difficulty: p.difficulty,
+                    testCount: p.testCount,
+                    sampleIn: p.sampleIn,
+                    sampleOut: p.sampleOut,
+                    warnings,
+                    log,
+                    elapsed,
+                });
+            } else {
+                render({
+                    ok: true,
+                    count: genForm.count,
+                    problems: problems.map((p) => ({ pid: p.pid, title: p.title, testCount: p.testCount })),
+                    warnings,
+                    log,
+                    elapsed,
+                });
             }
-            log.push(`题目已创建：#${docId}`);
-
-            render({
-                ok: true,
-                pid: docId,
-                title: generated.title,
-                notes: generated.notes,
-                tags: finalTags,
-                difficulty: generated.difficulty,
-                testCount: inputs.length,
-                sampleIn: inputs[0].trimEnd().slice(0, 2000),
-                sampleOut: outputs[0].trimEnd().slice(0, 2000),
-                warnings,
-                log,
-                elapsed: ((Date.now() - started) / 1000).toFixed(1),
-            });
         } catch (e: any) {
             log.push(`失败：${e?.message || e}`);
             let message = e?.message || String(e);

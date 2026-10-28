@@ -6,31 +6,56 @@
       <div class="section">
         <div class="section__header">
           <h1 class="section__title">
-            {% if result.ok %}出题成功：{{ result.title }}{% else %}出题失败{% endif %}
+            {% if result.ok %}
+              {% if result.problems and result.problems.length > 1 %}出题成功（{{ result.problems.length }} 道）{% else %}出题成功：{{ result.title }}{% endif %}
+            {% else %}出题失败{% endif %}
           </h1>
         </div>
         <div class="section__body typo">
           {% if result.ok %}
-            <p>
-              题目已放入题库，共 <strong>{{ result.testCount }}</strong> 个测试点，
-              用时 {{ result.elapsed }} 秒。
-              {% if result.notes %}<br>考点：{{ result.notes }}{% endif %}
-            </p>
-            <p>
-              <a class="button primary rounded" href="{{ url('problem_detail', pid=result.pid) }}">查看题目</a>
-              <a class="button rounded" href="{{ url('problem_edit', pid=result.pid) }}">编辑题面</a>
-              <a class="button rounded" href="{{ url('problem_config', pid=result.pid) }}">测试数据</a>
-            </p>
-            <div class="row">
-              <div class="medium-6 columns">
-                <h3>样例输入</h3>
-                <pre class="textbox" style="height:auto;white-space:pre-wrap">{{ result.sampleIn }}</pre>
+            {% if result.problems and result.problems.length > 1 %}
+              <p>本次共生成 <strong>{{ result.problems.length }}</strong> 道题，用时 {{ result.elapsed }} 秒。</p>
+              <table class="data-table">
+                <thead>
+                  <tr><th>题号</th><th>标题</th><th>测试点</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  {% for p in result.problems %}
+                    <tr>
+                      <td>#{{ p.pid }}</td>
+                      <td>{{ p.title }}</td>
+                      <td>{{ p.testCount }}</td>
+                      <td>
+                        <a href="{{ url('problem_detail', pid=p.pid) }}">查看</a>
+                        <a href="{{ url('problem_edit', pid=p.pid) }}">编辑</a>
+                        <a href="{{ url('problem_config', pid=p.pid) }}">数据</a>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p>
+                题目已放入题库，共 <strong>{{ result.testCount }}</strong> 个测试点，
+                用时 {{ result.elapsed }} 秒。
+                {% if result.notes %}<br>考点：{{ result.notes }}{% endif %}
+              </p>
+              <p>
+                <a class="button primary rounded" href="{{ url('problem_detail', pid=result.pid) }}">查看题目</a>
+                <a class="button rounded" href="{{ url('problem_edit', pid=result.pid) }}">编辑题面</a>
+                <a class="button rounded" href="{{ url('problem_config', pid=result.pid) }}">测试数据</a>
+              </p>
+              <div class="row">
+                <div class="medium-6 columns">
+                  <h3>样例输入</h3>
+                  <pre class="textbox" style="height:auto;white-space:pre-wrap">{{ result.sampleIn }}</pre>
+                </div>
+                <div class="medium-6 columns">
+                  <h3>样例输出</h3>
+                  <pre class="textbox" style="height:auto;white-space:pre-wrap">{{ result.sampleOut }}</pre>
+                </div>
               </div>
-              <div class="medium-6 columns">
-                <h3>样例输出</h3>
-                <pre class="textbox" style="height:auto;white-space:pre-wrap">{{ result.sampleOut }}</pre>
-              </div>
-            </div>
+            {% endif %}
           {% else %}
             <blockquote class="warn">{{ result.message }}</blockquote>
             <p>可以修改题目描述后重试，或在右侧检查模型配置。</p>
@@ -59,7 +84,7 @@
         <h1 class="section__title">AI 出题</h1>
       </div>
       <div class="section__body typo">
-        <p>描述你想要的题目，模型会生成题面、C++17 标程和 Python 数据生成器；系统在判题沙箱里跑出测试数据并自动建题。生成后请务必人工检查题面与数据。</p>
+        <p>描述你想要的题目，模型会生成题面、C++17 标程和 Python 数据生成器；系统在判题沙箱里跑出测试数据并自动建题。可一次生成多道题。生成后请务必人工检查题面与数据。</p>
       </div>
       <div class="section__body">
         <form method="post" action="{{ url('ai_problem_generate') }}" id="ai-generate-form">
@@ -103,6 +128,23 @@
             </div>
           </div>
           <div class="row">
+            <div class="medium-3 columns">
+              <label>
+                题目数量
+                <select name="count" class="select">
+                  <option value="1"{% if genForm.count == 1 %} selected{% endif %}>1 道</option>
+                  <option value="2"{% if genForm.count == 2 %} selected{% endif %}>2 道</option>
+                  <option value="3"{% if genForm.count == 3 %} selected{% endif %}>3 道</option>
+                  <option value="4"{% if genForm.count == 4 %} selected{% endif %}>4 道</option>
+                  <option value="5"{% if genForm.count == 5 %} selected{% endif %}>5 道</option>
+                </select>
+              </label>
+            </div>
+            <div class="medium-9 columns">
+              <p class="help-text" style="margin-top:22px">多道题共用上面的难度/时间/内存/测试点设置；耗时随题数近似线性增加，请耐心等待。</p>
+            </div>
+          </div>
+          <div class="row">
             <div class="columns">
               <label>
                 标签（可选，逗号分隔；留空则由模型决定）
@@ -113,7 +155,7 @@
           <div class="row">
             <div class="columns">
               <button type="submit" class="rounded primary button" id="ai-generate-btn">开始生成</button>
-              <span id="ai-generate-hint" style="display:none;margin-left:12px;color:#64748b">正在生成，通常需要 1–3 分钟，请不要关闭页面…</span>
+              <span id="ai-generate-hint" style="display:none;margin-left:12px;color:#64748b">正在生成，通常每道题需要 1–3 分钟，请不要关闭页面…</span>
             </div>
           </div>
         </form>
