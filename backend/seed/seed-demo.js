@@ -110,6 +110,6 @@ const hid = await upsertContest(
 );
 
 const homeContent = require('fs').readFileSync('/root/seed/home.md', 'utf8');
-await DomainModel.edit('system', { bulletin: homeContent });
+await DomainModel.edit('system', { bulletin: homeContent, _join: { method: 1, role: 'default' } });
 
 console.log('seed-ok', JSON.stringify({ problems: [d1, d2], contests: [tid, hid] }));
