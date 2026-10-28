@@ -2,6 +2,9 @@
 {% import "components/problem.html" as problem with context %}
 {% extends "layout/basic.html" %}
 {% block content %}
+  <style>
+    [data-fragment-id="problem_stat"] { right: 290px !important; }
+  </style>
   <div class="row">
     <div class="medium-9 columns">
       <div class="section display-mode">
@@ -10,7 +13,7 @@
             <div class="search">
               <input name="q" type="text" value="{{ qs }}" placeholder="{{ _('Search') }}">
               {% include "partials/problem_stat.html" %}
-              <select id="difficulty-select" class="search-sort" title="难度">
+              <select id="difficulty-select" class="search-sort" style="right:157px" title="难度">
                 <option value="">全部难度</option>
                 <option value="0">未评级</option>
                 <option value="1">入门(1)</option>
