@@ -591,7 +591,121 @@ class JjyuojBackgroundUploadHandler extends Handler {
     }
 }
 
+// FPS/LibreOJ 导入的题面会带预渲染 KaTeX：<span class="katex"><span class="katex-mathml">MathML文本 LaTeX源码 </span><span class="katex-html">…</span></span>
+// Hydro 渲染时会经过 XSS 白名单，katex 相关 class 被剥掉后 mathml 里的原始 LaTeX 源码就显示成乱码。
+// 这里在题目写入前把预渲染块还原成 \(…\) / \[…\] 源码，交给 Hydro 自己的 KaTeX 重新渲染。
+// katex-mathml 里是「渲染后的 MathML 文本 + LaTeX 源码」，katex-html 里是同一份渲染文本（含零宽空格）。
+// 用 katex-html 的可视文本做前缀，从 mathml 文本里剥掉它，剩下的就是 LaTeX 源码；前缀对不上（分式/求和打乱顺序、根号隐式等）时按可视文本长度回退。
+function stripTags(s: string) {
+    return s.replace(/<[^>]*>/g, '');
+}
+
+function decodeEntities(s: string) {
+    return s
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&');
+}
+
+function stripZwsp(s: string) {
+    return s.split('\u200b').join('');
+}
+
+function escapeLatex(src: string) {
+    return src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function extractKatexLatex(block: string): string | null {
+    const mathml = block.match(/<span class="katex-mathml">([\s\S]*?)<\/span>/);
+    if (!mathml) return null;
+    const htmlSpan = block.match(/<span class="katex-html"[^>]*>([\s\S]*)$/);
+    const mathmlText = stripZwsp(decodeEntities(stripTags(mathml[1])));
+    const visualText = htmlSpan ? stripZwsp(decodeEntities(stripTags(htmlSpan[1]))) : '';
+    let latex: string;
+    if (visualText.length > 0 && mathmlText.startsWith(visualText)) {
+        latex = mathmlText.slice(visualText.length);
+    } else {
+        const bs = mathmlText.indexOf('\\');
+        if (bs === -1) return null;
+        // 对齐环境（aligned/array 等）会按列重排，MathML 与可视文本长度不一致，直接用第一个反斜杠（源码必然以 \begin 开头）。
+        if (/\\begin\{/.test(mathmlText)) {
+            latex = mathmlText.slice(bs);
+        } else {
+            // 分式/求和等只会打乱顺序、不改变字符数；MathML 文本长度 ≈ 可视文本长度，只差根号（√ 在可视里显式出现、在 MathML 里是隐式的）。
+            const radicals = (visualText.match(/\u221a/g) || []).length;
+            const b = visualText.length - radicals;
+            if (b <= 0 || b >= mathmlText.length) latex = mathmlText.slice(bs);
+            else {
+                const candidate = mathmlText.slice(b);
+                latex = candidate.includes('\\') ? candidate : mathmlText.slice(bs);
+            }
+        }
+    }
+    latex = latex.trim();
+    return latex || null;
+}
+
+function cleanFpsMath(html: string) {
+    const s = String(html || '');
+    if (s.indexOf('<span class="katex">') === -1) return s;
+    const OPEN = '<span class="katex">';
+    const DISPLAY = '<span class="katex-display">';
+    let out = '';
+    let pos = 0;
+    while (true) {
+        const start = s.indexOf(OPEN, pos);
+        if (start === -1) { out += s.slice(pos); break; }
+        const isDisplay = start >= DISPLAY.length && s.slice(start - DISPLAY.length, start) === DISPLAY;
+        const blockStart = isDisplay ? start - DISPLAY.length : start;
+        out += s.slice(pos, blockStart);
+        let depth = 1;
+        let i = start + OPEN.length;
+        while (i < s.length && depth > 0) {
+            const open = s.indexOf('<span', i);
+            const close = s.indexOf('</span>', i);
+            if (close === -1) break;
+            if (open !== -1 && open < close) { depth++; i = open + 5; }
+            else { depth--; i = close + 7; }
+        }
+        if (depth !== 0) {
+            // 残缺的 katex 块（源数据截断导致 span 不配对），保持原样避免误伤
+            out += s.slice(blockStart, start + OPEN.length);
+            pos = start + OPEN.length;
+            continue;
+        }
+        let blockEnd = i;
+        if (isDisplay && s.slice(blockEnd, blockEnd + 7) === '</span>') blockEnd += 7;
+        const block = s.slice(blockStart, blockEnd);
+        const latex = extractKatexLatex(block);
+        if (latex === null) out += block;
+        else out += (isDisplay ? '\\[' : '\\(') + escapeLatex(latex) + (isDisplay ? '\\]' : '\\)');
+        pos = blockEnd;
+    }
+    return out;
+}
+
 export async function apply(ctx: Context) {
+    ctx.on('problem/before-edit', ($set) => {
+        if (typeof $set.content === 'string' && $set.content.includes('<span class="katex">')) {
+            $set.content = cleanFpsMath($set.content);
+        }
+    });
+    ctx.on('problem/add', async (doc, docId) => {
+        const original = typeof doc.content === 'string' ? doc.content : '';
+        const cleaned = cleanFpsMath(original);
+        if (cleaned === original) return;
+        try {
+            await ProblemModel.edit(doc.domainId, docId, { content: cleaned });
+        } catch (e: any) {
+            console.error('[ai-problem] clean FPS math failed for #%d: %s', docId, e?.message || e);
+        }
+    });
+
     ctx.injectUI('Nav', 'ai_problem', { prefix: 'ai-problem', displayName: 'AI 出题' }, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem', '/ai-problem', AiProblemHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem_generate', '/ai-problem/generate', AiGenerateHandler, PRIV.PRIV_EDIT_SYSTEM);
