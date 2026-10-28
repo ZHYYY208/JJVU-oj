@@ -4,6 +4,9 @@
 {% block content %}
   <style>
     [data-fragment-id="problem_stat"] { right: 290px !important; }
+    /* 题库标签默认显示：Hydro 默认隐藏标签且“显示标签”开关失效，这里强制显示并隐藏该开关 */
+    .hide-problem-tag .problem__tag.notag--hide { display: inline-block !important; }
+    .toggle-tag { display: none !important; }
   </style>
   <div class="row">
     <div class="medium-9 columns">
