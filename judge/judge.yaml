@@ -1,3 +1,4 @@
+memoryMax: 1024m
 hosts:
   localhost:
     type: hydro
