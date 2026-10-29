@@ -228,6 +228,44 @@ function normalizeTagResult(raw: any): { tags: string[], difficulty: number } {
     return { tags, difficulty: clamp(raw.difficulty, 1, 4, 0) };
 }
 
+function hasTestdata(p: any) {
+    const files = Array.isArray(p.data) ? p.data.map((f: any) => String(f.name || f._id || '')).filter(Boolean) : [];
+    return files.some((n: string) => /\.(in|out)$/.test(n));
+}
+
+function buildFixPrompt(title: string, content: string, timeLimitMs: number, memoryLimitMb: number, testCount: number) {
+    const text = content.length > 8000 ? content.slice(0, 8000) : content;
+    return `下面是一道在线评测题的题面。请为它写出可直接运行的标准程序和测试数据生成器，用来补齐这道题缺失的测试数据。
+
+题目标题：${title}
+
+题面：
+${text}
+
+时间限制：${timeLimitMs} ms
+内存限制：${memoryLimitMb} MB
+测试点数量：${testCount}（seed = 1 到 ${testCount}）
+
+硬性要求：
+1. 标准程序使用 C++17，从标准输入读取、向标准输出写出，不能输出任何调试信息或提示语，且必须能在限制内通过所有测试点。
+2. 数据生成器使用 Python 3，从命令行参数 sys.argv[1] 读取整数 seed，先执行 random.seed(seed)，再向标准输出打印一组合法输入。
+   seed=1 必须生成规模最小、适合放进题面的样例；其余 seed 要覆盖数据范围边界、特殊值和一般随机数据。
+3. 生成器不能依赖网络、第三方库或外部文件，单次运行不超过 10 秒。
+4. 标准程序和生成器必须严格符合题面描述的输入输出格式，不要自行改变题意。
+
+只输出一个 JSON 对象（不要 Markdown 代码围栏）：
+{ "standardCode": "C++17 标准程序源码", "generator": "Python3 数据生成器源码", "notes": "一句话说明本题考点" }`;
+}
+
+function normalizeFixResult(raw: any): { standardCode: string, generator: string, notes: string } {
+    if (!raw || typeof raw !== 'object') throw new Error('模型返回结构不正确');
+    const standardCode = String(raw.standardCode || '').trim();
+    const generator = String(raw.generator || '').trim();
+    if (!standardCode) throw new Error('模型没有给出标准程序');
+    if (!generator) throw new Error('模型没有给出数据生成器');
+    return { standardCode, generator, notes: String(raw.notes || '').slice(0, 300) };
+}
+
 async function callSandbox(body: any, timeoutMs = 90000): Promise<SandboxResult> {
     const res = await fetchWithTimeout(`${SANDBOX_URL}/run`, {
         method: 'POST',
@@ -662,6 +700,132 @@ class AiTagRunHandler extends Handler {
     }
 }
 
+class AiFixDataHandler extends Handler {
+    async get() {
+        const problems = await ProblemModel.getMulti(
+            this.args.domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'data'],
+        ).toArray();
+        const targets = problems.filter((p) => !hasTestdata(p));
+        this.response.template = 'ai_fixdata.html';
+        this.response.body = {
+            ...maskConfig(),
+            fixForm: { timeLimit: 1000, memoryLimit: 256, testCount: 10, limit: 10, pids: '' },
+            counts: { total: problems.length, noData: targets.length },
+            targets: targets.slice(0, 100).map((p) => ({ pid: p.pid || `P${p.docId}`, docId: p.docId, title: p.title })),
+            result: null,
+        };
+    }
+}
+
+class AiFixDataRunHandler extends Handler {
+    @post('limit', Types.Int, true)
+    @post('timeLimit', Types.Int, true)
+    @post('memoryLimit', Types.Int, true)
+    @post('testCount', Types.Int, true)
+    @post('pids', Types.String, true)
+    async post(domainId: string, limit = 10, timeLimit = 1000, memoryLimit = 256, testCount = 10, pids = '') {
+        await this.limitRate('ai_fixdata_run', 600, 3);
+        const limited = clamp(limit, 1, 30, 10);
+        const timeLimitMs = clamp(timeLimit, 100, 10000, 1000);
+        const memoryLimitMb = clamp(memoryLimit, 32, 512, 256);
+        const testCnt = clamp(testCount, 3, 15, 10);
+        const config = getConfig();
+        const render = (result: any) => {
+            this.response.template = 'ai_fixdata.html';
+            this.response.body = {
+                ...maskConfig(),
+                fixForm: { timeLimit: timeLimitMs, memoryLimit: memoryLimitMb, testCount: testCnt, limit: limited, pids },
+                result,
+            };
+        };
+        const log: string[] = [];
+        const started = Date.now();
+        try {
+            if (!config.apiKey) throw new Error('还没有配置模型 API Key，请先在「模型配置」里填写');
+            const list = await ProblemModel.getMulti(
+                domainId, {}, [...ProblemModel.PROJECTION_LIST, 'content', 'data'],
+            ).toArray();
+            const wanted = (pids || '').split(/[\s,，、;；]+/).map((s) => s.trim()).filter(Boolean).map((s) => s.toUpperCase());
+            let targets: any[];
+            if (wanted.length) {
+                const want = new Set(wanted);
+                targets = list.filter((p) => {
+                    const pid = String(p.pid || '').toUpperCase();
+                    const docIdStr = String(p.docId);
+                    const bare = pid.replace(/^[^0-9]+/, '');
+                    return want.has(docIdStr) || want.has(pid) || (bare && want.has(bare));
+                });
+            } else {
+                targets = list.filter((p) => !hasTestdata(p)).slice(0, limited);
+            }
+            if (!targets.length) {
+                render({ ok: true, done: 0, items: [], elapsed: '0.0', message: '没有需要补齐测试数据的题目', log });
+                return;
+            }
+            const versionRes = await fetchWithTimeout(`${SANDBOX_URL}/version`, {}, 8000);
+            if (!versionRes.ok) throw new Error('判题沙箱不可用，请确认 oj-judge 容器已启动');
+            log.push(`开始为 ${targets.length} 道题补齐测试数据…`);
+
+            const items: any[] = [];
+            const queue = targets.slice();
+            const worker = async () => {
+                while (queue.length) {
+                    const p = queue.shift()!;
+                    const pid = p.pid || `P${p.docId}`;
+                    try {
+                        const content = typeof p.content === 'string' ? p.content : '';
+                        if (content.trim().length < 10) throw new Error('题面为空或过短，无法生成测试数据');
+                        const prompt = buildFixPrompt(p.title, content, timeLimitMs, memoryLimitMb, testCnt);
+                        let raw: any;
+                        try {
+                            raw = await callModel(config, prompt);
+                        } catch (firstErr) {
+                            raw = await callModel(config, prompt);
+                        }
+                        const fix = normalizeFixResult(raw);
+                        log.push(`#${pid}《${p.title}》编译标准程序…`);
+                        const stdFileId = await compileStandard(fix.standardCode);
+                        const inputs: string[] = [];
+                        const outputs: string[] = [];
+                        try {
+                            for (let seed = 1; seed <= testCnt; seed += 1) {
+                                const input = await runGenerator(fix.generator, seed);
+                                if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error(`seed=${seed} 生成的数据超过 8MB`);
+                                const output = await runStandard(stdFileId, input, timeLimitMs, memoryLimitMb);
+                                inputs.push(input);
+                                outputs.push(output);
+                            }
+                        } finally {
+                            await sandboxDeleteFile(stdFileId);
+                        }
+                        const configYaml = `time: ${timeLimitMs}ms\nmemory: ${memoryLimitMb}m\n`;
+                        await ProblemModel.edit(domainId, p.docId, { config: configYaml });
+                        await ProblemModel.addTestdata(domainId, p.docId, 'config.yaml', Buffer.from(configYaml));
+                        for (let i = 0; i < inputs.length; i += 1) {
+                            await ProblemModel.addTestdata(domainId, p.docId, `${i + 1}.in`, Buffer.from(inputs[i]));
+                            await ProblemModel.addTestdata(domainId, p.docId, `${i + 1}.out`, Buffer.from(outputs[i]));
+                        }
+                        items.push({ pid, docId: p.docId, title: p.title, ok: true, testCount: inputs.length, notes: fix.notes });
+                        log.push(`#${pid}《${p.title}》补齐完成：${inputs.length} 个测试点（${fix.notes}）`);
+                    } catch (e: any) {
+                        items.push({ pid, docId: p.docId, title: p.title, ok: false, error: e?.message || String(e) });
+                        log.push(`#${pid}《${p.title}》失败：${e?.message || e}`);
+                    }
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(3, targets.length) }, () => worker()));
+            items.sort((a, b) => a.docId - b.docId);
+            const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+            render({ ok: true, done: items.length, items, elapsed, log });
+        } catch (e: any) {
+            log.push(`失败：${e?.message || e}`);
+            let message = e?.message || String(e);
+            if (e?.name === 'AbortError') message = '模型请求超时（180 秒），请重试';
+            render({ ok: false, message, log });
+        }
+    }
+}
+
 const LOGO_PATHS = [
     join(__dirname, 'assets', 'logo.png'),
     '/root/.hydro/addons/ai-problem/assets/logo.png',
@@ -939,11 +1103,14 @@ export async function apply(ctx: Context) {
 
     ctx.injectUI('Nav', 'ai_problem', { prefix: 'ai-problem', displayName: 'AI 出题' }, PRIV.PRIV_EDIT_SYSTEM);
     ctx.injectUI('Nav', 'ai_tag', { prefix: 'ai-tag', displayName: 'AI 打标签' }, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.injectUI('Nav', 'ai_fixdata', { prefix: 'ai-fixdata', displayName: 'AI 补齐数据' }, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem', '/ai-problem', AiProblemHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem_generate', '/ai-problem/generate', AiGenerateHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_problem_config', '/ai-problem/config', AiConfigHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_tag', '/ai-tag', AiTagHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('ai_tag_run', '/ai-tag/run', AiTagRunHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('ai_fixdata', '/ai-fixdata', AiFixDataHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('ai_fixdata_run', '/ai-fixdata/run', AiFixDataRunHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('jjyuoj_logo_png', '/jjyuoj-logo.png', JjyuojLogoHandler);
     ctx.Route('jjyuoj_logo_svg', '/jjyuoj-logo.svg', JjyuojLogoHandler);
     ctx.Route('jjyuoj_favicon', '/favicon.ico', JjyuojLogoHandler);

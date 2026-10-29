@@ -1,0 +1,176 @@
+{% extends "layout/basic.html" %}
+{% block content %}
+<div class="row">
+  <div class="medium-9 columns">
+    {% if result %}
+      <div class="section">
+        <div class="section__header">
+          <h1 class="section__title">
+            {% if result.ok %}
+              {% if result.done == 0 %}没有需要处理的题目{% else %}补齐完成（{{ result.done }} 道，用时 {{ result.elapsed }} 秒）{% endif %}
+            {% else %}补齐失败{% endif %}
+          </h1>
+        </div>
+        <div class="section__body typo">
+          {% if result.ok %}
+            {% if result.message %}<blockquote class="note">{{ result.message }}</blockquote>{% endif %}
+            {% if result.items and result.items.length %}
+              <table class="data-table">
+                <thead>
+                  <tr><th>题号</th><th>标题</th><th>状态</th><th>测试点</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                  {% for it in result.items %}
+                    <tr>
+                      <td>#{{ it.pid }}</td>
+                      <td>{{ it.title }}</td>
+                      <td>{% if it.ok %}成功{% else %}失败：{{ it.error }}{% endif %}</td>
+                      <td>{% if it.ok %}{{ it.testCount }}{% else %}—{% endif %}</td>
+                      <td>{% if it.ok %}{{ it.notes }}{% else %}—{% endif %}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          {% else %}
+            <blockquote class="warn">{{ result.message }}</blockquote>
+          {% endif %}
+
+          {% if result.log and result.log.length %}
+            <details>
+              <summary>处理过程</summary>
+              <ul>{% for line in result.log %}<li>{{ line }}</li>{% endfor %}</ul>
+            </details>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">AI 自动补齐测试数据</h1>
+      </div>
+      <div class="section__body typo">
+        <p>AI 读取题面，为它生成标准程序和测试数据生成器，在判题沙箱里跑出输入/输出后写回题库。适合给没有测试数据的题目（例如手动创建的空题、导入失败的题）批量补数据。</p>
+        {% if counts %}
+          <p>当前题库共 <strong>{{ counts.total }}</strong> 道题，其中 <strong>{{ counts.noData }}</strong> 道没有测试数据（.in/.out）。</p>
+        {% endif %}
+      </div>
+      <div class="section__body">
+        <form method="post" action="{{ url('ai_fixdata_run') }}" id="ai-fix-form">
+          <div class="row">
+            <div class="medium-4 columns">
+              <label>
+                时间限制（ms）
+                <input name="timeLimit" type="number" min="100" max="10000" step="100" class="textbox" value="{{ fixForm.timeLimit }}">
+              </label>
+            </div>
+            <div class="medium-4 columns">
+              <label>
+                内存限制（MB）
+                <input name="memoryLimit" type="number" min="32" max="512" step="32" class="textbox" value="{{ fixForm.memoryLimit }}">
+              </label>
+            </div>
+            <div class="medium-4 columns">
+              <label>
+                每道题测试点数量
+                <input name="testCount" type="number" min="3" max="15" class="textbox" value="{{ fixForm.testCount }}">
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="medium-4 columns">
+              <label>
+                本次最多处理几道
+                <input name="limit" type="number" min="1" max="30" class="textbox" value="{{ fixForm.limit }}">
+              </label>
+            </div>
+            <div class="medium-8 columns">
+              <label>
+                指定题号（可选）
+                <input name="pids" type="text" class="textbox" value="{{ fixForm.pids }}" placeholder="留空则按顺序补齐缺测试数据的题；多个题号用逗号/空格分隔">
+              </label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="columns">
+              <button type="submit" class="rounded primary button" id="ai-fix-btn">开始补齐</button>
+              <span id="ai-fix-hint" style="display:none;margin-left:12px;color:#64748b">正在处理，每道题约 10–30 秒，请不要关闭页面…</span>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {% if targets and targets.length %}
+      <div class="section">
+        <div class="section__header">
+          <h1 class="section__title">缺测试数据的题目</h1>
+        </div>
+        <div class="section__body typo">
+          <ul>
+            {% for t in targets %}
+              <li>#{{ t.pid }} — {{ t.title }}</li>
+            {% endfor %}
+          </ul>
+          {% if counts.noData > targets.length %}<p>…共 {{ counts.noData }} 道，其余未列出。</p>{% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="medium-3 columns">
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">模型配置</h1>
+      </div>
+      <div class="section__body">
+        <p class="help-text">
+          当前：{{ modelName }}{% if hasKey %}（已配置 Key）{% else %}（未配置 Key）{% endif %}
+        </p>
+        <form method="post" action="{{ url('ai_problem_config') }}">
+          <label>
+            接口地址（OpenAI 兼容）
+            <input name="baseUrl" class="textbox" value="{{ baseUrl }}" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>
+            模型名
+            <input name="model" class="textbox" value="{{ modelName }}" placeholder="deepseek-flash">
+          </label>
+          <label>
+            API Key
+            <input name="apiKey" type="password" class="textbox" placeholder="{% if hasKey %}已保存，留空则不修改{% else %}填写你的 API Key{% endif %}" autocomplete="new-password">
+          </label>
+          <button type="submit" class="rounded button">保存配置</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">使用提示</h1>
+      </div>
+      <div class="section__body typo">
+        <ul>
+          <li>只处理「没有 .in/.out 测试数据」的题；已有测试数据的题不会被覆盖（除非你填了题号强制指定）。</li>
+          <li>AI 生成的测试数据不一定完全正确，补齐后建议到题目页点一下「评测」验证样例。</li>
+          <li>内存限制默认 256MB，若判题机提示 memory 超限可在这里调低。</li>
+          <li>最多 3 道题同时处理，失败会自动重试一次。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var form = document.getElementById('ai-fix-form');
+    if (!form) return;
+    form.addEventListener('submit', function () {
+      var btn = document.getElementById('ai-fix-btn');
+      var hint = document.getElementById('ai-fix-hint');
+      if (btn) { btn.disabled = true; btn.textContent = '处理中…'; }
+      if (hint) hint.style.display = 'inline';
+    });
+  })();
+</script>
+{% endblock %}
