@@ -25,7 +25,8 @@ let changed = false;
 
 // 仓颉（Cangjie）：判题镜像 /opt/cangjie 已装 SDK，编译器 cjc + 运行时库（沙箱里 /opt/cangjie 为只读挂载）
 const CANGJIE = {
-    compile: '/bin/bash -c "export CANGJIE_HOME=/opt/cangjie; export PATH=/opt/cangjie/bin:$PATH; export LD_LIBRARY_PATH=/opt/cangjie/tools/lib:/opt/cangjie/runtime/lib/linux_x86_64_cjnative; /opt/cangjie/bin/cjc foo.cj -o foo"',
+    // cjc 基于 LLVM，找 ar/ld 等工具走 -B 搜索路径而非 PATH；系统 binutils 的 ar 在 /usr/bin，需显式 -B/usr/bin
+    compile: '/bin/bash -c "export CANGJIE_HOME=/opt/cangjie; export PATH=/opt/cangjie/bin:/opt/cangjie/tools/bin:$PATH; export LD_LIBRARY_PATH=/opt/cangjie/tools/lib:/opt/cangjie/runtime/lib/linux_x86_64_cjnative; /opt/cangjie/bin/cjc -B/usr/bin foo.cj -o foo"',
     code_file: 'foo.cj',
     execute: '/bin/bash -c "export LD_LIBRARY_PATH=/opt/cangjie/runtime/lib/linux_x86_64_cjnative; ./foo"',
     display: 'Cangjie',
