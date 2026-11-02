@@ -18,6 +18,15 @@ RUN curl -fL --retry 3 --max-time 300 "$GO_JUDGE_MIRROR/go-judge_1.9.4_linux_amd
  && ln -sf /usr/local/bin/node /usr/bin/node \
  && sandbox -version
 
+# 仓颉（Cangjie）语言工具链：编译器 cjc + 运行时库，装到 /opt/cangjie 供判题沙箱挂载使用
+ARG CANGJIE_SDK_URL=https://cangjie-lang.cn/v1/files/auth/downLoad?nsId=142267&fileName=cangjie-sdk-linux-x64-1.2.0.tar.gz&objectKey=6ab1e26eece1f87ff5befa73
+RUN mkdir -p /opt/cangjie \
+ && curl -fL --retry 3 --max-time 900 "$CANGJIE_SDK_URL" -o /tmp/cangjie-sdk.tar.gz \
+ && tar -xzf /tmp/cangjie-sdk.tar.gz -C /opt/cangjie --strip-components=1 \
+ && rm -f /tmp/cangjie-sdk.tar.gz \
+ && chmod -R a+rX /opt/cangjie \
+ && ls -la /opt/cangjie/bin
+
 COPY entrypoint.sh /root/entrypoint.sh
 RUN chmod +x /root/entrypoint.sh
 

@@ -24,6 +24,10 @@ mount:
     target: /var
     readonly: true
   - type: bind
+    source: /opt/cangjie
+    target: /opt/cangjie
+    readonly: true
+  - type: bind
     source: /dev/null
     target: /dev/null
   - type: bind
