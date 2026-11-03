@@ -1,0 +1,159 @@
+{% extends "layout/basic.html" %}
+{% block content %}
+<div class="row">
+  <div class="medium-9 columns">
+    <div class="section">
+      <div class="section__body">
+        <form method="post">
+          <div class="row">
+            <div class="medium-9 columns">
+              <label>
+                {{ _('Title') }}
+                <input name="title" placeholder="{{ _('title') }}" value="{{ tdoc.title|default('') }}" class="textbox" autofocus>
+              </label>
+            </div>
+            <div class="medium-3 columns">
+              <label>
+                {{ _('Pin') }}
+                <input name="pin" placeholder="{{ _('Pin level') }}" value="{{ tdoc.pin|default(0) }}" class="textbox">
+              </label>
+            </div>
+          </div>
+          <div class="row"><div class="columns">
+            <label>
+              {{ _('Introduce') }}
+              <textarea name="content" class="textbox">{{ tdoc['content']|default('') }}</textarea>
+              <p class="help-text">{{ _('Introduce must not exceed 500 characters and it will be shown in the list view.') }}</p>
+            </label>
+          </div></div>
+          <div class="row"><div class="columns">
+            <label>
+              {{ _('Description') }}
+              <textarea name="description" class="textbox" data-markdown style="height: 200px">{{ tdoc['description']|default('') }}</textarea>
+            </label>
+          </div></div>
+          <div class="row"><div class="columns">
+            <label>
+              快速添加题目（可选）
+              <textarea id="training-quick-pids" class="textbox" rows="5" placeholder="粘贴题目编号，每行一个，或用逗号 / 空格 / 分号分隔。例如：&#10;1001&#10;1002, 1003&#10;P1004"></textarea>
+              <p class="help-text">点下方「生成到 Plan」会自动把这些编号组织成训练计划 JSON 并填入 Plan 框，无需手写 JSON。</p>
+            </label>
+            <div class="row">
+              <div class="medium-3 columns">
+                <label>
+                  每节题目数
+                  <input id="training-quick-per" type="number" class="textbox" value="1" min="1" step="1">
+                </label>
+              </div>
+              <div class="medium-5 columns">
+                <label class="checkbox">
+                  <input id="training-quick-chain" type="checkbox" checked> 按顺序解锁（做完前一节才能做下一节）
+                </label>
+              </div>
+              <div class="medium-4 columns">
+                <button type="button" id="training-quick-generate" class="rounded primary button">生成到 Plan</button>
+                <span id="training-quick-msg" class="help-text"></span>
+              </div>
+            </div>
+          </div></div>
+          <div class="row"><div class="columns">
+            <label>
+              {{ _('Plan') }}
+              <textarea data-json name="dag" class="textbox" style="height: 500px">{% if tdoc %}{{ dag }}{% else %}[
+  {
+    "_id": 1,
+    "title": "第 1 节",
+    "requireNids": [],
+    "pids": [1]
+  }
+]{% endif %}</textarea>
+            </label>
+          </div></div>
+          <div class="row"><div class="columns">
+          {% if page_name == 'training_edit' %}
+            <button type="submit" class="rounded primary button">
+              {{ _('Update') }}
+            </button>
+            {% if handler.user.own(tdoc) or handler.user.hasPerm(perm.PERM_EDIT_TRAINING) %}
+              <button name="operation" value="delete" type="submit" class="rounded button">
+                {{ _('Delete') }}
+              </button>
+            {% endif %}
+          {% else %}
+            <button type="submit" class="rounded primary button">
+              {{ _('Create') }}
+            </button>
+          {% endif %}
+            <button type="button" class="rounded button" onclick="window.history.go(-1)">
+              {{ _('Cancel') }}
+            </button>
+          </div></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="medium-3 columns">
+    {% include 'components/md_hint.html' %}
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+(function () {
+  var src = document.getElementById('training-quick-pids');
+  var per = document.getElementById('training-quick-per');
+  var chain = document.getElementById('training-quick-chain');
+  var btn = document.getElementById('training-quick-generate');
+  var msg = document.getElementById('training-quick-msg');
+  var dagBox = document.querySelector('textarea[name="dag"]');
+  if (!src || !btn || !dagBox) return;
+
+  function fail(text) {
+    msg.textContent = text;
+    msg.style.color = '#b91c1c';
+  }
+
+  function parsePids(text) {
+    var tokens = String(text || '').split(/[\s,;，；、]+/);
+    var seen = {};
+    var pids = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i].trim();
+      if (!t) continue;
+      if (!/^\d+$/.test(t) && !/^[Pp]\d+$/.test(t)) {
+        fail('无法识别的编号：' + t);
+        return null;
+      }
+      var key = t.toUpperCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      pids.push(t);
+    }
+    return pids;
+  }
+
+  btn.addEventListener('click', function () {
+    msg.textContent = '';
+    msg.style.color = '';
+    var pids = parsePids(src.value);
+    if (!pids) return;
+    if (!pids.length) { fail('请先粘贴题目编号'); return; }
+    if (dagBox.value.trim() && !window.confirm('将覆盖下方 Plan 中已有的内容，继续？')) return;
+    var n = parseInt(per.value, 10);
+    if (!(n >= 1)) n = 1;
+    var dag = [];
+    for (var i = 0, id = 1; i < pids.length; i += n, id++) {
+      var slice = pids.slice(i, i + n);
+      var requireNids = (chain.checked && id > 1) ? [id - 1] : [];
+      dag.push({ _id: id, title: slice.join(', '), requireNids: requireNids, pids: slice });
+    }
+    dagBox.value = JSON.stringify(dag, null, 2);
+    dagBox.dispatchEvent(new Event('input', { bubbles: true }));
+    dagBox.dispatchEvent(new Event('change', { bubbles: true }));
+    msg.textContent = '已生成 ' + dag.length + ' 节、' + pids.length + ' 道题，已填入下方 Plan，点提交即可。';
+    msg.style.color = '#166534';
+  });
+})();
+</script>
+{% endblock %}
